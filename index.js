@@ -16,8 +16,19 @@ if (!token) {
 const bot = new TelegramBot(token, { polling: true });
 
 // Game state storage - stores active games per chat
-// Key: chatId, Value: { game, lastMove, players, lastMessageId, moveHistory }
+// Key: chatId, Value: { game, lastMove, players, whiteTeam, blackTeam, capturedPieces, resignVotes, drawVotes, moveHistory }
 const activeGames = new Map();
+
+// Piece values for captured pieces display
+const pieceValues = {
+    'p': 1, 'n': 3, 'b': 3, 'r': 5, 'q': 9, 'k': 0,
+    'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 0
+};
+
+const pieceSymbols = {
+    'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
+    'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
+};
 
 // Create temp directory for images
 const tempDir = path.join(__dirname, 'temp');
@@ -118,12 +129,51 @@ async function showGameStatus(chatId, gameState, username = '') {
         }
     }
     
+    // Add captured pieces display
+    if (gameState.capturedPieces) {
+        const whiteCaptured = gameState.capturedPieces.white;
+        const blackCaptured = gameState.capturedPieces.black;
+        
+        if (whiteCaptured.length > 0 || blackCaptured.length > 0) {
+            statusMessage += `\n\n📥 Captured:`;
+            
+            // Calculate total values
+            let whiteValue = 0;
+            let blackValue = 0;
+            
+            whiteCaptured.forEach(piece => {
+                whiteValue += pieceValues[piece] || 0;
+            });
+            blackCaptured.forEach(piece => {
+                blackValue += pieceValues[piece] || 0;
+            });
+            
+            // Display captured pieces
+            if (whiteCaptured.length > 0) {
+                const pieceDisplay = whiteCaptured.map(p => pieceSymbols[p]).join('');
+                statusMessage += `\n⚪ White: ${pieceDisplay} (${whiteValue} pts)`;
+            }
+            if (blackCaptured.length > 0) {
+                const pieceDisplay = blackCaptured.map(p => pieceSymbols[p]).join('');
+                statusMessage += `\n⚫ Black: ${pieceDisplay} (${blackValue} pts)`;
+            }
+        }
+    }
+    
     // Add move history if available
     if (gameState.moveHistory && gameState.moveHistory.length > 0) {
+        const totalMoves = gameState.moveHistory.length;
         const recentMoves = gameState.moveHistory.slice(-5); // Show last 5 moves
-        statusMessage += `\n\n📜 Recent moves:`;
+        const startNum = Math.max(1, totalMoves - recentMoves.length + 1);
+        
+        statusMessage += `\n\n📜 Recent moves (${totalMoves} total):`;
         recentMoves.forEach((move, index) => {
-            statusMessage += `\n${move.number}. ${move.player}: ${move.move}`;
+            const actualNum = startNum + index;
+            let moveText = `${actualNum}. ${move.player}: ${move.move}`;
+            if (move.captured) {
+                moveText += ` captures ${move.captured}`;
+            }
+            statusMessage += `\n${moveText}`;
         });
         if (gameState.moveHistory.length > 5) {
             statusMessage += `\n... (${gameState.moveHistory.length - 5} earlier moves)`;
@@ -161,7 +211,18 @@ async function showGameStatus(chatId, gameState, username = '') {
     // Add control buttons
     keyboard.push([
         { text: '🏠 Home', callback_data: 'home' },
-        { text: '🔄 Refresh', callback_data: 'refresh' },
+        { text: '🔄 Refresh', callback_data: 'refresh' }
+    ]);
+    
+    // Add history button if there are moves
+    if (gameState.moveHistory && gameState.moveHistory.length > 0) {
+        keyboard.push([
+            { text: '📜 Full History', callback_data: 'show_history' }
+        ]);
+    }
+    
+    // Add resign button
+    keyboard.push([
         { text: '❌ Resign', callback_data: 'resign' }
     ]);
     
@@ -206,11 +267,22 @@ bot.on('callback_query', async (callbackQuery) => {
         activeGames.set(chatId, {
             game: newGame,
             lastMove: null,
-            players: [username],
+            players: [],
+            whiteTeam: [],
+            blackTeam: [],
+            capturedPieces: { white: [], black: [] },
+            resignVotes: { white: [], black: [] },
+            drawVotes: { white: [], black: [] },
             moveHistory: []
         });
-        bot.sendMessage(chatId, `🎮 New game started by ${username}!`);
-        await showGameStatus(chatId, activeGames.get(chatId), username);
+        bot.sendMessage(chatId, `🎮 New game started by ${username}! Choose your side:`, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '⚪ Join White', callback_data: 'join_white' }],
+                    [{ text: '⚫ Join Black', callback_data: 'join_black' }]
+                ]
+            }
+        });
         return;
     }
     
@@ -223,10 +295,71 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
         const gameState = activeGames.get(chatId);
+        
+        // Check if user already joined
+        if (gameState.players.includes(username)) {
+            bot.sendMessage(chatId, `You're already in the game!`);
+            return;
+        }
+        
+        // Show side selection
+        bot.sendMessage(chatId, `Choose your side:`, {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '⚪ Join White', callback_data: 'join_white' }],
+                    [{ text: '⚫ Join Black', callback_data: 'join_black' }]
+                ]
+            }
+        });
+        return;
+    }
+    
+    // Handle joining white team
+    if (data === 'join_white') {
+        if (!activeGames.has(chatId)) {
+            bot.sendMessage(chatId, 'No active game found.');
+            return;
+        }
+        const gameState = activeGames.get(chatId);
+        
+        // Remove from black team if they were there
+        gameState.blackTeam = gameState.blackTeam.filter(p => p !== username);
+        
+        // Add to white team if not already there
+        if (!gameState.whiteTeam.includes(username)) {
+            gameState.whiteTeam.push(username);
+        }
+        
+        // Add to players list
         if (!gameState.players.includes(username)) {
             gameState.players.push(username);
         }
-        bot.sendMessage(chatId, `👤 ${username} joined the game!\nPlayers: ${gameState.players.join(', ')}`);
+        
+        bot.sendMessage(chatId, `⚪ ${username} joined the White team!\nWhite: ${gameState.whiteTeam.join(', ')}\nBlack: ${gameState.blackTeam.join(', ') || 'None'}`);
+        await showGameStatus(chatId, gameState, username);
+        return;
+    }
+    
+    // Handle joining black team
+    if (data === 'join_black') {
+        if (!activeGames.has(chatId)) {
+            bot.sendMessage(chatId, 'No active game found.');
+            return;
+        }
+        const gameState = activeGames.get(chatId);
+        
+        // Remove from white team if they were there
+        gameState.whiteTeam = gameState.whiteTeam.filter(p => p !== username);
+        
+        // Add to black team if not already there
+        gameState.blackTeam.push(username);
+        
+        // Add to players list
+        if (!gameState.players.includes(username)) {
+            gameState.players.push(username);
+        }
+        
+        bot.sendMessage(chatId, `⚫ ${username} joined the Black team!\nWhite: ${gameState.whiteTeam.join(', ') || 'None'}\nBlack: ${gameState.blackTeam.join(', ')}`);
         await showGameStatus(chatId, gameState, username);
         return;
     }
@@ -311,9 +444,64 @@ bot.on('callback_query', async (callbackQuery) => {
         return;
     }
     
+    if (data === 'show_history') {
+        if (!gameState.moveHistory || gameState.moveHistory.length === 0) {
+            bot.sendMessage(chatId, 'No moves yet!');
+            return;
+        }
+        
+        let historyText = `📜 Full Move History (${gameState.moveHistory.length} moves):\n\n`;
+        gameState.moveHistory.forEach((move) => {
+            let moveText = `${move.number}. ${move.player}: ${move.move}`;
+            if (move.captured) {
+                moveText += ` captures ${move.captured}`;
+            }
+            historyText += moveText + '\n';
+        });
+        
+        // Add team information
+        historyText += `\n⚪ White Team: ${gameState.whiteTeam.join(', ') || 'None'}`;
+        historyText += `\n⚫ Black Team: ${gameState.blackTeam.join(', ') || 'None'}`;
+        
+        bot.sendMessage(chatId, historyText);
+        return;
+    }
+    
     if (data === 'resign') {
-        activeGames.delete(chatId);
-        bot.sendMessage(chatId, `🏳️ ${username} resigned. Game ended.`);
+        // Determine which team the user is on
+        let userTeam = null;
+        let teamName = '';
+        
+        if (gameState.whiteTeam.includes(username)) {
+            userTeam = gameState.resignVotes.white;
+            teamName = 'White';
+        } else if (gameState.blackTeam.includes(username)) {
+            userTeam = gameState.resignVotes.black;
+            teamName = 'Black';
+        } else {
+            bot.sendMessage(chatId, `❌ You must join a team first to vote!`);
+            return;
+        }
+        
+        // Add vote if not already voted
+        if (!userTeam.includes(username)) {
+            userTeam.push(username);
+            
+            // Count team members and votes
+            const teamPlayers = teamName === 'White' ? gameState.whiteTeam.length : gameState.blackTeam.length;
+            const voteCount = userTeam.length;
+            const majorityNeeded = Math.ceil(teamPlayers / 2); // More than half
+            
+            if (voteCount >= majorityNeeded) {
+                // Majority reached - end game
+                activeGames.delete(chatId);
+                bot.sendMessage(chatId, `🏳️ ${teamName} team resigned (${voteCount}/${teamPlayers} votes). Game ended.`);
+            } else {
+                bot.sendMessage(chatId, `🖐️ ${username} voted to resign.\n${teamName} team: ${voteCount}/${majorityNeeded} votes needed (${teamPlayers} total players)`);
+            }
+        } else {
+            bot.sendMessage(chatId, `You've already voted to resign.`);
+        }
         return;
     }
     
@@ -324,6 +512,24 @@ bot.on('callback_query', async (callbackQuery) => {
             bot.sendMessage(chatId, 'Game is over.', {
                 reply_markup: { inline_keyboard: keyboard }
             });
+            return;
+        }
+        
+        // Check if user has joined any team
+        const hasJoinedTeam = gameState.whiteTeam.includes(username) || gameState.blackTeam.includes(username);
+        if (!hasJoinedTeam) {
+            bot.sendMessage(chatId, `❌ You must join a team first! Use "Join Game" to choose White or Black.`);
+            return;
+        }
+        
+        // Check if user is on the correct team
+        const currentSide = game.turn() === 'w' ? 'white' : 'black';
+        const team = currentSide === 'white' ? gameState.whiteTeam : gameState.blackTeam;
+        
+        if (!team.includes(username)) {
+            const currentPlayer = currentSide === 'white' ? 'White' : 'Black';
+            bot.sendMessage(chatId, `❌ It's ${currentPlayer}'s turn, but you're on the other team!`);
+            await showGameStatus(chatId, gameState, username);
             return;
         }
         
@@ -347,6 +553,14 @@ bot.on('callback_query', async (callbackQuery) => {
                 timestamp: new Date()
             };
             
+            // Track captured pieces
+            if (move.captured) {
+                const capturedPiece = move.captured;
+                const capturingSide = move.color;
+                const capturedSide = capturingSide === 'w' ? 'black' : 'white';
+                gameState.capturedPieces[capturedSide].push(capturedPiece);
+            }
+            
             // Add move to history
             if (!gameState.moveHistory) {
                 gameState.moveHistory = [];
@@ -354,10 +568,13 @@ bot.on('callback_query', async (callbackQuery) => {
             gameState.moveHistory.push({
                 number: gameState.moveHistory.length + 1,
                 player: username,
-                move: `${move.from} → ${move.to}`
+                move: `${move.from} → ${move.to}`,
+                captured: move.captured ? pieceSymbols[move.captured] : null
             });
             
-            const moveDescription = `${move.from} → ${move.to}`;
+            const moveDescription = move.captured ? 
+                `${move.from} → ${move.to} captures ${pieceSymbols[move.captured]}` : 
+                `${move.from} → ${move.to}`;
             
             // Notify about the move
             bot.sendMessage(chatId, `✅ ${username} played: ${moveDescription}`);
@@ -439,11 +656,23 @@ bot.onText(/\/newgame/, (msg) => {
     activeGames.set(chatId, {
         game: newGame,
         lastMove: null,
-        players: [username],
+        players: [],
+        whiteTeam: [],
+        blackTeam: [],
+        capturedPieces: { white: [], black: [] },
+        resignVotes: { white: [], black: [] },
+        drawVotes: { white: [], black: [] },
         moveHistory: []
     });
     
-    bot.sendMessage(chatId, `🎮 New game started by ${username}!`);
+    bot.sendMessage(chatId, `🎮 New game started by ${username}! Choose your side:`, {
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: '⚪ Join White', callback_data: 'join_white' }],
+                [{ text: '⚫ Join Black', callback_data: 'join_black' }]
+            ]
+        }
+    });
     showGameStatus(chatId, activeGames.get(chatId), username);
 });
 
@@ -500,6 +729,23 @@ bot.onText(/\/move (.+)/, (msg, match) => {
         return;
     }
     
+    // Check if user has joined any team
+    const hasJoinedTeam = gameState.whiteTeam.includes(username) || gameState.blackTeam.includes(username);
+    if (!hasJoinedTeam) {
+        bot.sendMessage(chatId, `❌ You must join a team first! Use /join to choose White or Black.`);
+        return;
+    }
+    
+    // Check if user is on the correct team
+    const currentSide = game.turn() === 'w' ? 'white' : 'black';
+    const team = currentSide === 'white' ? gameState.whiteTeam : gameState.blackTeam;
+    
+    if (!team.includes(username)) {
+        const currentPlayer = currentSide === 'white' ? 'White' : 'Black';
+        bot.sendMessage(chatId, `❌ It's ${currentPlayer}'s turn, but you're on the other team!`);
+        return;
+    }
+    
     const moveNotation = match[1].trim();
     
     try {
@@ -521,6 +767,14 @@ bot.onText(/\/move (.+)/, (msg, match) => {
             timestamp: new Date()
         };
         
+        // Track captured pieces
+        if (move.captured) {
+            const capturedPiece = move.captured;
+            const capturingSide = move.color;
+            const capturedSide = capturingSide === 'w' ? 'black' : 'white';
+            gameState.capturedPieces[capturedSide].push(capturedPiece);
+        }
+        
         // Add move to history
         if (!gameState.moveHistory) {
             gameState.moveHistory = [];
@@ -528,10 +782,13 @@ bot.onText(/\/move (.+)/, (msg, match) => {
         gameState.moveHistory.push({
             number: gameState.moveHistory.length + 1,
             player: username,
-            move: `${move.from} → ${move.to}`
+            move: `${move.from} → ${move.to}`,
+            captured: move.captured ? pieceSymbols[move.captured] : null
         });
         
-        const moveDescription = `${move.from} → ${move.to}`;
+        const moveDescription = move.captured ? 
+            `${move.from} → ${move.to} captures ${pieceSymbols[move.captured]}` : 
+            `${move.from} → ${move.to}`;
         
         // Notify about the move
         bot.sendMessage(chatId, 
