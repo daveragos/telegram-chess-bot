@@ -4,6 +4,10 @@ const { Chess } = require('chess.js');
 const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
+const { initDatabase, getActiveGames, getGameByChannelId, saveGame, deleteGame } = require('./database');
+
+// Initialize database
+const db = initDatabase();
 
 // Initialize the bot with your Telegram Bot Token
 const token = process.env.BOT_TOKEN;
@@ -44,6 +48,35 @@ const pieceUnicode = {
     'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
     'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
 };
+
+// Helper function to check if enough time has passed since the last move
+function canMakeMove(gameState) {
+    if (!gameState.moveDelay || !gameState.moveDelay.enabled) {
+        return true; // No delay, can move immediately
+    }
+    
+    if (!gameState.lastMoveTime) {
+        return true; // No previous move, can move
+    }
+    
+    const timeSinceLastMove = (Date.now() - gameState.lastMoveTime) / 1000; // in seconds
+    const requiredDelay = gameState.moveDelay.baseDelay + (gameState.moveDelay.increment * (gameState.moveNumber || 0));
+    
+    return timeSinceLastMove >= requiredDelay;
+}
+
+// Helper function to get remaining delay time
+function getRemainingDelay(gameState) {
+    if (!gameState.moveDelay || !gameState.moveDelay.enabled || !gameState.lastMoveTime) {
+        return 0;
+    }
+    
+    const timeSinceLastMove = (Date.now() - gameState.lastMoveTime) / 1000;
+    const requiredDelay = gameState.moveDelay.baseDelay + (gameState.moveDelay.increment * (gameState.moveNumber || 0));
+    const remaining = Math.max(0, requiredDelay - timeSinceLastMove);
+    
+    return Math.ceil(remaining);
+}
 
 // Helper function to generate SVG chess board
 function generateChessBoardSVG(game) {
@@ -129,6 +162,12 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
         statusMessage = `Current turn: ${currentPlayer}`;
         if (game.isCheck()) {
             statusMessage += ' ⚠️ (Check!)';
+        }
+        
+        // Add delay countdown if enabled
+        const remaining = getRemainingDelay(gameState);
+        if (remaining > 0) {
+            statusMessage += `\n\n⏳ Please wait ${remaining}s before the next move`;
         }
     }
     
@@ -304,6 +343,73 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
     }, 1000);
 }
 
+// Helper function to handle joining a game
+async function handleGameJoin(channelId, chatId, username, team) {
+    let gameState = activeGames.get(channelId);
+    
+    if (!gameState) {
+        bot.sendMessage(chatId, 'Game not found in memory. Please try again.');
+        return;
+    }
+    
+    // Check if user is already in a team
+    const isInWhiteTeam = gameState.whiteTeam.includes(username);
+    const isInBlackTeam = gameState.blackTeam.includes(username);
+    
+    if (isInWhiteTeam || isInBlackTeam) {
+        const currentTeam = isInWhiteTeam ? 'White' : 'Black';
+        bot.sendMessage(chatId, `✅ You're already joined on the ${currentTeam} team!\n\nRefreshing board...`);
+        await showGameStatus(chatId, gameState, username);
+        return;
+    }
+    
+    // Add user to the selected team
+    if (team === 'white') {
+        gameState.blackTeam = gameState.blackTeam.filter(p => p !== username);
+        if (!gameState.whiteTeam.includes(username)) {
+            gameState.whiteTeam.push(username);
+        }
+    } else if (team === 'black') {
+        gameState.whiteTeam = gameState.whiteTeam.filter(p => p !== username);
+        if (!gameState.blackTeam.includes(username)) {
+            gameState.blackTeam.push(username);
+        }
+    }
+    
+    // Add to players list
+    if (!gameState.players) {
+        gameState.players = [];
+    }
+    if (!gameState.players.includes(username)) {
+        gameState.players.push(username);
+    }
+    
+    // Store the connection
+    userToChannel.set(String(chatId), channelId);
+    
+    // Add user to joinedUsers list
+    if (!gameState.joinedUsers) {
+        gameState.joinedUsers = [];
+    }
+    if (!gameState.joinedUsers.includes(chatId)) {
+        gameState.joinedUsers.push(chatId);
+    }
+    
+    // Update the database
+    await saveGame(db, {
+        channelId: gameState.channelId,
+        channelName: gameState.channelName,
+        gameState: { fen: gameState.game.fen() },
+        whiteTeam: gameState.whiteTeam,
+        blackTeam: gameState.blackTeam,
+        moveCount: gameState.game.history().length
+    });
+    
+    const teamIcon = team === 'white' ? '⚪' : '⚫';
+    bot.sendMessage(chatId, `${teamIcon} ${username} joined the ${team === 'white' ? 'White' : 'Black'} team!\nWhite: ${gameState.whiteTeam.join(', ')}\nBlack: ${gameState.blackTeam.join(', ') || 'None'}`);
+    await showGameStatus(chatId, gameState, username);
+}
+
 // Handle callback queries (button clicks)
 bot.on('callback_query', async (callbackQuery) => {
     const msg = callbackQuery.message;
@@ -438,30 +544,299 @@ bot.on('callback_query', async (callbackQuery) => {
     }
     
     if (data === 'start_join') {
-        if (!activeGames.has(chatId)) {
-            const keyboard = [[{ text: '🎮 Start New Game', callback_data: 'start_newgame' }]];
-            bot.sendMessage(chatId, 'No active game found.', {
-                reply_markup: { inline_keyboard: keyboard }
+        // First check if there's a local game
+        if (activeGames.has(chatId)) {
+            const gameState = activeGames.get(chatId);
+            
+            // Check if user already joined
+            if (gameState.players.includes(username)) {
+                bot.sendMessage(chatId, `You're already in the game!`);
+                return;
+            }
+            
+            // Show side selection
+            bot.sendMessage(chatId, `Choose your side:`, {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '⚪ Join White', callback_data: 'join_white' }],
+                        [{ text: '⚫ Join Black', callback_data: 'join_black' }]
+                    ]
+                }
             });
             return;
         }
-        const gameState = activeGames.get(chatId);
         
-        // Check if user already joined
-        if (gameState.players.includes(username)) {
-            bot.sendMessage(chatId, `You're already in the game!`);
+        // Query database for active games
+        getActiveGames(db).then(games => {
+            const keyboard = [];
+            
+            if (games.length === 0) {
+                keyboard.push([{ text: '🎮 Start New Game', callback_data: 'start_newgame' }]);
+                bot.sendMessage(chatId, 'No active games found.', {
+                    reply_markup: { inline_keyboard: keyboard }
+                });
+                return;
+            }
+            
+            // Remove duplicates based on channelId
+            const uniqueGames = games.filter((game, index, self) => 
+                index === self.findIndex((g) => g.channelId === game.channelId)
+            );
+            
+            // Show active games
+            let message = `🎮 Active Games (${uniqueGames.length}):\n\n`;
+            
+            uniqueGames.forEach((game, index) => {
+                const whiteTeam = JSON.parse(game.whiteTeam || '[]');
+                const blackTeam = JSON.parse(game.blackTeam || '[]');
+                const channelName = game.channelName || `Game ${game.id}`;
+                
+                message += `${index + 1}. ${channelName}\n`;
+                message += `   ⚪ White: ${whiteTeam.length} player(s)\n`;
+                message += `   ⚫ Black: ${blackTeam.length} player(s)\n`;
+                message += `   🎯 Moves: ${game.moveCount}\n\n`;
+                
+                // Create button for each game
+                keyboard.push([{ 
+                    text: `${index + 1}. ${channelName}`, 
+                    callback_data: `join_game_${game.channelId}` 
+                }]);
+            });
+            
+            // Add back button
+            keyboard.push([{ text: '🔙 Back', callback_data: 'home' }]);
+            
+            bot.sendMessage(chatId, message, {
+                reply_markup: { inline_keyboard: keyboard }
+            });
+        }).catch(error => {
+            console.error('Error getting active games:', error);
+            bot.sendMessage(chatId, 'Error loading games. Please try again.');
+        });
+        return;
+    }
+    
+    // Handle joining a specific game from the list
+    if (data.startsWith('join_game_')) {
+        const channelId = data.replace('join_game_', '');
+        
+        // Try to get game from active games
+        let gameState = activeGames.get(channelId);
+        
+        // If not in active games, try to load from database
+        if (!gameState) {
+            getGameByChannelId(db, channelId).then(dbGame => {
+                if (!dbGame) {
+                    bot.sendMessage(chatId, 'Game not found.');
+                    return;
+                }
+                
+                // Load the game state from database
+                const gameStateData = JSON.parse(dbGame.gameState);
+                const game = new Chess();
+                game.load(gameStateData.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+                
+                // Reconstruct full game state with all required fields
+                const whiteTeam = JSON.parse(dbGame.whiteTeam || '[]');
+                const blackTeam = JSON.parse(dbGame.blackTeam || '[]');
+                
+                // Initialize move delay system
+                const baseDelay = 5; // Start with 5 seconds delay
+                const increment = 2; // Increase by 2 seconds each move
+                
+                gameState = {
+                    game: game,
+                    lastMove: null,
+                    players: [...whiteTeam, ...blackTeam],
+                    whiteTeam: whiteTeam,
+                    blackTeam: blackTeam,
+                    joinedUsers: [],
+                    capturedPieces: { white: [], black: [] },
+                    resignVotes: { white: [], black: [] },
+                    drawVotes: { white: [], black: [] },
+                    moveHistory: [],
+                    channelId: dbGame.channelId,
+                    channelName: dbGame.channelName,
+                    channelMessageId: null,
+                    moveDelay: {
+                        enabled: true,
+                        baseDelay: baseDelay,
+                        increment: increment
+                    },
+                    lastMoveTime: null,
+                    moveNumber: 0
+                };
+                
+                // Store in active games
+                activeGames.set(channelId, gameState);
+                
+                // Show side selection
+                bot.sendMessage(chatId, 
+                    `🎮 Joining: ${dbGame.channelName || `Game ${dbGame.id}`}\n\nChoose your side:`, 
+                    {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [{ text: '⚪ Join White', callback_data: `join_game_white_${channelId}` }],
+                                [{ text: '⚫ Join Black', callback_data: `join_game_black_${channelId}` }]
+                            ]
+                        }
+                    }
+                );
+            }).catch(error => {
+                console.error('Error loading game from database:', error);
+                bot.sendMessage(chatId, 'Error loading game.');
+            });
             return;
         }
         
-        // Show side selection
-        bot.sendMessage(chatId, `Choose your side:`, {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '⚪ Join White', callback_data: 'join_white' }],
-                    [{ text: '⚫ Join Black', callback_data: 'join_black' }]
-                ]
+        // Game is in active games, show side selection
+        bot.sendMessage(chatId, 
+            `🎮 Joining: ${gameState.channelName || channelId}\n\nChoose your side:`, 
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '⚪ Join White', callback_data: `join_game_white_${channelId}` }],
+                        [{ text: '⚫ Join Black', callback_data: `join_game_black_${channelId}` }]
+                    ]
+                }
             }
-        });
+        );
+        return;
+    }
+    
+    // Handle joining white team for a selected game
+    if (data.startsWith('join_game_white_')) {
+        const channelId = data.replace('join_game_white_', '');
+        console.log('Attempting to join white team:', { channelId, chatId, username });
+        
+        // Check if game is in active games
+        if (!activeGames.has(channelId)) {
+            bot.sendMessage(chatId, 'Game not found in memory. Loading from database...');
+            
+            // Try to load from database
+            getGameByChannelId(db, channelId).then(dbGame => {
+                if (!dbGame) {
+                    bot.sendMessage(chatId, 'Game not found.');
+                    return;
+                }
+                
+                const gameStateData = JSON.parse(dbGame.gameState);
+                const game = new Chess();
+                game.load(gameStateData.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+                
+                const whiteTeam = JSON.parse(dbGame.whiteTeam || '[]');
+                const blackTeam = JSON.parse(dbGame.blackTeam || '[]');
+                
+                // Initialize time control
+                const initialTime = 300;
+                const increment = 3;
+                
+                const gameState = {
+                    game: game,
+                    lastMove: null,
+                    players: [...whiteTeam, ...blackTeam],
+                    whiteTeam: whiteTeam,
+                    blackTeam: blackTeam,
+                    joinedUsers: [],
+                    capturedPieces: { white: [], black: [] },
+                    resignVotes: { white: [], black: [] },
+                    drawVotes: { white: [], black: [] },
+                    moveHistory: [],
+                    channelId: dbGame.channelId,
+                    channelName: dbGame.channelName,
+                    channelMessageId: null,
+                    timeControl: {
+                        enabled: true,
+                        initialSeconds: initialTime,
+                        incrementSeconds: increment
+                    },
+                    timeRemaining: {
+                        white: initialTime,
+                        black: initialTime
+                    },
+                    timerInterval: null
+                };
+                
+                activeGames.set(channelId, gameState);
+                
+                // Now join
+                handleGameJoin(channelId, chatId, username, 'white');
+            }).catch(error => {
+                console.error('Error loading game:', error);
+                bot.sendMessage(chatId, 'Error loading game.');
+            });
+            return;
+        }
+        
+        handleGameJoin(channelId, chatId, username, 'white');
+        return;
+    }
+    
+    // Handle joining black team for a selected game
+    if (data.startsWith('join_game_black_')) {
+        const channelId = data.replace('join_game_black_', '');
+        console.log('Attempting to join black team:', { channelId, chatId, username });
+        
+        // Check if game is in active games
+        if (!activeGames.has(channelId)) {
+            bot.sendMessage(chatId, 'Game not found in memory. Loading from database...');
+            
+            // Try to load from database
+            getGameByChannelId(db, channelId).then(dbGame => {
+                if (!dbGame) {
+                    bot.sendMessage(chatId, 'Game not found.');
+                    return;
+                }
+                
+                const gameStateData = JSON.parse(dbGame.gameState);
+                const game = new Chess();
+                game.load(gameStateData.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+                
+                const whiteTeam = JSON.parse(dbGame.whiteTeam || '[]');
+                const blackTeam = JSON.parse(dbGame.blackTeam || '[]');
+                
+                // Initialize time control
+                const initialTime = 300;
+                const increment = 3;
+                
+                const gameState = {
+                    gameэффици: game,
+                    lastMove: null,
+                    players: [...whiteTeam, ...blackTeam],
+                    whiteTeam: whiteTeam,
+                    blackTeam: blackTeam,
+                    joinedUsers: [],
+                    capturedPieces: { white: [], black: [] },
+                    resignVotes: { white: [], black: [] },
+                    drawVotes: { white: [], black: [] },
+                    moveHistory: [],
+                    channelId: dbGame.channelId,
+                    channelName: dbGame.channelName,
+                    channelMessageId: null,
+                    timeControl: {
+                        enabled: true,
+                        initialSeconds: initialTime,
+                        incrementSeconds: increment
+                    },
+                    timeRemaining: {
+                        white: initialTime,
+                        black: initialTime
+                    },
+                    timerInterval: null
+                };
+                
+                activeGames.set(channelId, gameState);
+                
+                // Now join
+                handleGameJoin(channelId, chatId, username, 'black');
+            }).catch(error => {
+                console.error('Error loading game:', error);
+                bot.sendMessage(chatId, 'Error loading game.');
+            });
+            return;
+        }
+        
+        handleGameJoin(channelId, chatId, username, 'black');
         return;
     }
     
@@ -522,6 +897,16 @@ bot.on('callback_query', async (callbackQuery) => {
         if (!gameState.joinedUsers.includes(chatId)) {
             gameState.joinedUsers.push(chatId);
         }
+        
+        // Save to database
+        await saveGame(db, {
+            channelId: gameState.channelId,
+            channelName: gameState.channelName || gameState.channelId,
+            gameState: { fen: gameState.game.fen() },
+            whiteTeam: gameState.whiteTeam,
+            blackTeam: gameState.blackTeam,
+            moveCount: gameState.game.history().length
+        });
         
         bot.sendMessage(chatId, `⚪ ${username} joined the White team in the channel game!\nWhite: ${gameState.whiteTeam.join(', ')}\nBlack: ${gameState.blackTeam.join(', ') || 'None'}`);
         await showGameStatus(chatId, gameState, username);
@@ -587,6 +972,16 @@ bot.on('callback_query', async (callbackQuery) => {
         if (!gameState.joinedUsers.includes(chatId)) {
             gameState.joinedUsers.push(chatId);
         }
+        
+        // Save to database
+        await saveGame(db, {
+            channelId: gameState.channelId,
+            channelName: gameState.channelName || gameState.channelId,
+            gameState: { fen: gameState.game.fen() },
+            whiteTeam: gameState.whiteTeam,
+            blackTeam: gameState.blackTeam,
+            moveCount: gameState.game.history().length
+        });
         
         bot.sendMessage(chatId, `⚫ ${username} joined the Black team in the channel game!\nWhite: ${gameState.whiteTeam.join(', ') || 'None'}\nBlack: ${gameState.blackTeam.join(', ')}`);
         await showGameStatus(chatId, gameState, username);
@@ -828,6 +1223,12 @@ bot.on('callback_query', async (callbackQuery) => {
             if (voteCount >= majorityNeeded) {
                 // Majority reached - end game
                 activeGames.delete(gameKey);
+                
+                // Delete from database if it's a channel game
+                if (gameState.channelId) {
+                    await deleteGame(db, gameState.channelId);
+                }
+                
                 bot.sendMessage(chatId, `🏳️ ${teamName} team resigned (${voteCount}/${teamPlayers} votes). Game ended.`);
             } else {
                 bot.sendMessage(chatId, `🖐️ ${username} voted to resign.\n${teamName} team: ${voteCount}/${majorityNeeded} votes needed (${teamPlayers} total players)`);
@@ -899,6 +1300,14 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
         
+        // Check if enough time has passed since last move
+        if (!canMakeMove(targetGameState)) {
+            const remaining = getRemainingDelay(targetGameState);
+            bot.sendMessage(chatId, `⏳ Please wait ${remaining} seconds before making your next move.`);
+            await showGameStatus(chatId, targetGameState, username);
+            return;
+        }
+        
         // Check if user is on the correct team
         const currentSide = targetGame.turn() === 'w' ? 'white' : 'black';
         const team = currentSide === 'white' ? targetGameState.whiteTeam : targetGameState.blackTeam;
@@ -930,6 +1339,10 @@ bot.on('callback_query', async (callbackQuery) => {
                 timestamp: new Date()
             };
             
+            // Update delay tracking
+            targetGameState.lastMoveTime = Date.now();
+            targetGameState.moveNumber = (targetGameState.moveNumber || 0) + 1;
+            
             // Track captured pieces
             if (move.captured) {
                 const capturedPiece = move.captured;
@@ -952,6 +1365,23 @@ bot.on('callback_query', async (callbackQuery) => {
             const moveDescription = move.captured ? 
                 `${move.from} → ${move.to} captures ${pieceSymbols[move.captured]}` : 
                 `${move.from} → ${move.to}`;
+            
+            // Save to database if this is a channel game
+            if (targetGameState.channelId) {
+                await saveGame(db, {
+                    channelId: targetGameState.channelId,
+                    channelName: targetGameState.channelName || targetGameState.channelId,
+                    gameState: { fen: targetGame.fen() },
+                    whiteTeam: targetGameState.whiteTeam,
+                    blackTeam: targetGameState.blackTeam,
+                    moveCount: targetGame.history().length
+                });
+                
+                // If game is over, delete from database
+                if (targetGame.isGameOver()) {
+                    await deleteGame(db, targetGameState.channelId);
+                }
+            }
             
             // Notify about the move
             bot.sendMessage(chatId, `✅ ${username} played: ${moveDescription}`);
@@ -1005,6 +1435,10 @@ async function startGameInChannel(channelId, username) {
     
     // Create a new game
     const newGame = new Chess();
+    // Initialize move delay system
+    const baseDelay = 5; // Start with 5 seconds between moves
+    const increment = 2; // Increase by 2 seconds each move
+    
     activeGames.set(gameKey, {
         game: newGame,
         lastMove: null,
@@ -1017,7 +1451,34 @@ async function startGameInChannel(channelId, username) {
         drawVotes: { white: [], black: [] },
         moveHistory: [],
         channelId: String(channelId),
-        channelMessageId: null
+        channelMessageId: null,
+        moveDelay: {
+            enabled: true,
+            baseDelay: baseDelay,
+            increment: increment
+        },
+        lastMoveTime: null,
+        moveNumber: 0
+    });
+    
+    // Get channel name for database
+    let channelName = channelId;
+    try {
+        const chat = await bot.getChat(channelId);
+        channelName = chat.title || chat.username || channelId;
+        activeGames.get(gameKey).channelName = channelName;
+    } catch (error) {
+        console.error('Error getting channel info:', error);
+    }
+    
+    // Save to database
+    await saveGame(db, {
+        channelId: String(channelId),
+        channelName: channelName,
+        gameState: { fen: newGame.fen() },
+        whiteTeam: [],
+        blackTeam: [],
+        moveCount: 0
     });
     
     // Show the board in channel

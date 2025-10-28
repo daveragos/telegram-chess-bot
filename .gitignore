@@ -21,3 +21,7 @@ Thumbs.db
 # Temp files
 temp/
 
+# Database
+*.db
+*.db-journal
+
