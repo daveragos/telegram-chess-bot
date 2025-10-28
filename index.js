@@ -233,12 +233,25 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
         caption: statusMessage
     };
     
-    // Only add buttons if requested
-    if (withButtons) {
-        options.reply_markup = {
-            inline_keyboard: keyboard
-        };
-        console.log('Buttons created for chatId:', chatId, 'Button count:', keyboard.length);
+    // Add buttons if requested, or if this is a channel post (to show join link)
+    if (withButtons || gameState.channelId) {
+        // If this is a channel post and we don't have buttons yet, add just a join link
+        if (gameState.channelId && !withButtons) {
+            // Get bot username for deep link
+            const botInfo = await bot.getMe();
+            const deepLink = `https://t.me/${botInfo.username}?start=channel_${gameState.channelId}`;
+            options.reply_markup = {
+                inline_keyboard: [
+                    [{ text: '🎮 Join & Play', url: deepLink }]
+                ]
+            };
+            console.log('Added join link button for channel:', gameState.channelId);
+        } else if (withButtons) {
+            options.reply_markup = {
+                inline_keyboard: keyboard
+            };
+            console.log('Buttons created for chatId:', chatId, 'Button count:', keyboard.length);
+        }
     } else {
         console.log('No buttons created (withButtons=false) for chatId:', chatId);
     }
@@ -249,16 +262,23 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
     if (gameState.channelMessageId && chatId === gameState.channelId) {
         // Update existing message in channel
         try {
+            const editOptions = {
+                chat_id: chatId,
+                message_id: gameState.channelMessageId
+            };
+            
+            // Add reply_markup if we have it
+            if (options.reply_markup) {
+                editOptions.reply_markup = options.reply_markup;
+            }
+            
             await bot.editMessageMedia(
                 {
                     type: 'photo',
                     media: imageStream,
                     caption: statusMessage
                 },
-                {
-                    chat_id: chatId,
-                    message_id: gameState.channelMessageId
-                }
+                editOptions
             );
         } catch (error) {
             // If update fails, send new message
@@ -454,6 +474,31 @@ bot.on('callback_query', async (callbackQuery) => {
         }
         const gameState = activeGames.get(channelId);
         
+        // Check if user is already in a team
+        const isInWhiteTeam = gameState.whiteTeam.includes(username);
+        const isInBlackTeam = gameState.blackTeam.includes(username);
+        
+        if (isInWhiteTeam || isInBlackTeam) {
+            const currentTeam = isInWhiteTeam ? 'White' : 'Black';
+            bot.sendMessage(chatId, `✅ You're already joined on the ${currentTeam} team!\n\nRefreshing board...`);
+            
+            // Make sure userToChannel is set for existing players
+            if (!userToChannel.has(String(chatId))) {
+                userToChannel.set(String(chatId), channelId);
+            }
+            
+            // Make sure user is in joinedUsers list
+            if (!gameState.joinedUsers) {
+                gameState.joinedUsers = [];
+            }
+            if (!gameState.joinedUsers.includes(chatId)) {
+                gameState.joinedUsers.push(chatId);
+            }
+            
+            await showGameStatus(chatId, gameState, username);
+            return;
+        }
+        
         // Remove from black team if they were there
         gameState.blackTeam = gameState.blackTeam.filter(p => p !== username);
         
@@ -471,6 +516,9 @@ bot.on('callback_query', async (callbackQuery) => {
         userToChannel.set(String(chatId), channelId);
         
         // Add user to joinedUsers list to receive updates
+        if (!gameState.joinedUsers) {
+            gameState.joinedUsers = [];
+        }
         if (!gameState.joinedUsers.includes(chatId)) {
             gameState.joinedUsers.push(chatId);
         }
@@ -491,6 +539,31 @@ bot.on('callback_query', async (callbackQuery) => {
         }
         const gameState = activeGames.get(channelId);
         
+        // Check if user is already in a team
+        const isInWhiteTeam = gameState.whiteTeam.includes(username);
+        const isInBlackTeam = gameState.blackTeam.includes(username);
+        
+        if (isInWhiteTeam || isInBlackTeam) {
+            const currentTeam = isInWhiteTeam ? 'White' : 'Black';
+            bot.sendMessage(chatId, `✅ You're already joined on the ${currentTeam} team!\n\nRefreshing board...`);
+            
+            // Make sure userToChannel is set for existing players
+            if (!userToChannel.has(String(chatId))) {
+                userToChannel.set(String(chatId), channelId);
+            }
+            
+            // Make sure user is in joinedUsers list
+            if (!gameState.joinedUsers) {
+                gameState.joinedUsers = [];
+            }
+            if (!gameState.joinedUsers.includes(chatId)) {
+                gameState.joinedUsers.push(chatId);
+            }
+            
+            await showGameStatus(chatId, gameState, username);
+            return;
+        }
+        
         // Remove from white team if they were there
         gameState.whiteTeam = gameState.whiteTeam.filter(p => p !== username);
         
@@ -508,6 +581,9 @@ bot.on('callback_query', async (callbackQuery) => {
         userToChannel.set(String(chatId), channelId);
         
         // Add user to joinedUsers list to receive updates
+        if (!gameState.joinedUsers) {
+            gameState.joinedUsers = [];
+        }
         if (!gameState.joinedUsers.includes(chatId)) {
             gameState.joinedUsers.push(chatId);
         }
@@ -953,13 +1029,13 @@ async function startGameInChannel(channelId, username) {
     
     await bot.sendMessage(channelId, 
         `🎮 Chess Game Started! 🎮\n\n` +
-        `📱 To play, click the button below to join! 👇\n\n` +
+        `📱 Click "Join & Play" on the board above to start playing! 👆\n\n` +
         `⚪ White plays first!\n` +
         `👥 Anyone can join the game!`,
         {
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: '🎮 Join This Game', url: deepLink }]
+                    [{ text: '🎮 Join & Play', url: deepLink }]
                 ]
             }
         }
