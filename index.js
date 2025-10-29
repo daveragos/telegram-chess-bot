@@ -10,14 +10,12 @@ const { initDatabase, getActiveGames, getGameByChannelId, saveGame, deleteGame }
 const db = initDatabase();
 
 // Initialize the bot with your Telegram Bot Token
-const token = process.env.BOT_TOKEN || process.env.bot_token || process.env.token;
+const token = process.env.BOT_TOKEN;
 if (!token) {
     console.error('Error: BOT_TOKEN not found in environment variables');
-    console.error('Please set BOT_TOKEN in your environment variables');
-    console.error('Available env vars:', Object.keys(process.env).filter(k => k.toLowerCase().includes('bot') || k.toLowerCase().includes('token')));
+    console.error('Please create a .env file with your bot token');
     process.exit(1);
 }
-console.log('Bot token loaded successfully (length:', token.length, ')');
 
 const bot = new TelegramBot(token, { polling: { autoStart: true, interval: 500 } });
 
@@ -45,20 +43,10 @@ if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true });
 }
 
-// Unicode chess pieces for SVG - using UTF-8 encoding
+// Unicode chess pieces for SVG
 const pieceUnicode = {
-    'p': '\u265F', // ♟ black pawn
-    'n': '\u265E', // ♞ black knight
-    'b': '\u265D', // ♝ black bishop
-    'r': '\u265C', // ♜ black rook
-    'q': '\u265B', // ♛ black queen
-    'k': '\u265A', // ♚ black king
-    'P': '\u2659', // ♙ white pawn
-    'N': '\u2658', // ♘ white knight
-    'B': '\u2657', // ♗ white bishop
-    'R': '\u2656', // ♖ white rook
-    'Q': '\u2655', // ♕ white queen
-    'K': '\u2654'  // ♔ white king
+    'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
+    'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
 };
 
 // Helper function to check if enough time has passed since the last move
@@ -137,38 +125,9 @@ function formatTime(seconds) {
     return parts.join(' ') || `${seconds}s`;
 }
 
-// Helper function to generate empty board if needed
-function generateEmptyBoard() {
-    const squareSize = 60;
-    const boardSize = squareSize * 8;
-    const padding = 40;
-    let svg = `<svg width="${boardSize + (padding * 2) + 80}" height="${boardSize + (padding * 2) + 80}" xmlns="http://www.w3.org/2000/svg">`;
-    svg += `<rect width="${boardSize + (padding * 2) + 80}" height="${boardSize + (padding * 2) + 80}" fill="#f0d9b5"/>`;
-    
-    // Draw empty board
-    for (let rank = 0; rank < 8; rank++) {
-        for (let file = 0; file < 8; file++) {
-            const isLight = (rank + file) % 2 === 0;
-            const color = isLight ? '#f0d9b5' : '#b58863';
-            const x = file * squareSize + padding + 40;
-            const y = rank * squareSize + padding + 40;
-            svg += `<rect x="${x}" y="${y}" width="${squareSize}" height="${squareSize}" fill="${color}"/>`;
-        }
-    }
-    svg += `</svg>`;
-    return svg;
-}
-
 // Helper function to generate SVG chess board
 function generateChessBoardSVG(game) {
     const board = game.board();
-    
-    // Ensure board is valid 8x8
-    if (!board || board.length !== 8) {
-        console.error('Invalid board state:', board);
-        return generateEmptyBoard();
-    }
-    
     const squareSize = 60;
     const boardSize = squareSize * 8;
     const padding = 40; 
@@ -176,34 +135,13 @@ function generateChessBoardSVG(game) {
     // Check if we should rotate the board (when it's Black's turn)
     const isBlackTurn = game.turn() === 'b';
     
-    const totalWidth = boardSize + (padding * 2) + 80;
-    const totalHeight = boardSize + (padding * 2) + 80;
-    
-    // Create SVG with proper XML declaration and encoding
-    let svg = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-    svg += `<svg width="${totalWidth}" height="${totalHeight}" viewBox="0 0 ${totalWidth} ${totalHeight}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">`;
-    
-    // Add style for proper Unicode rendering
-    svg += `<defs><style type="text/css">
-        <![CDATA[
-        .chess-piece {
-            font-family: 'Arial Unicode MS', 'DejaVu Sans', 'Segoe UI Symbol', 'Noto Color Emoji', 'Apple Color Emoji', sans-serif;
-            font-weight: normal;
-            font-style: normal;
-        }
-        ]]>
-    </style></defs>`;
+    let svg = `<svg width="${boardSize + (padding * 2) + 80}" height="${boardSize + (padding * 2) + 80}" xmlns="http://www.w3.org/2000/svg">`;
     
     // Background
     svg += `<rect width="${boardSize + (padding * 2) + 80}" height="${boardSize + (padding * 2) + 80}" fill="#f0d9b5"/>`;
     
-    // Draw squares - ensure exactly 8x8
+    // Draw squares
     for (let rank = 0; rank < 8; rank++) {
-        if (!board[rank] || board[rank].length !== 8) {
-            console.error(`Invalid rank ${rank}:`, board[rank]);
-            continue;
-        }
-        
         for (let file = 0; file < 8; file++) {
             // Calculate display position (rotated if Black's turn)
             const displayRank = isBlackTurn ? (7 - rank) : rank;
@@ -217,15 +155,10 @@ function generateChessBoardSVG(game) {
             svg += `<rect x="${x}" y="${y}" width="${squareSize}" height="${squareSize}" fill="${color}"/>`;
             
             // Add piece from the actual board position
-            const square = board[displayRank] && board[displayRank][displayFile];
-            if (square && square.type && square.color) {
-                const pieceKey = square.color === 'w' ? square.type.toUpperCase() : square.type;
-                const pieceChar = pieceUnicode[pieceKey];
-                
-                if (pieceChar) {
-                    // Use class for proper font rendering and add stroke for better visibility
-                    svg += `<text class="chess-piece" x="${x + squareSize / 2}" y="${y + squareSize / 2 + 5}" font-size="${squareSize - 8}" fill="${square.color === 'w' ? '#ffffff' : '#000000'}" stroke="${square.color === 'w' ? '#000000' : '#ffffff'}" stroke-width="1" text-anchor="middle" dominant-baseline="central">${pieceChar}</text>`;
-                }
+            const square = board[displayRank][displayFile];
+            if (square) {
+                const pieceChar = pieceUnicode[square.color === 'w' ? square.type.toUpperCase() : square.type];
+                svg += `<text x="${x + squareSize / 2}" y="${y + squareSize / 2}" font-size="${squareSize - 10}" fill="${square.color === 'w' ? 'white' : 'black'}" text-anchor="middle" dominant-baseline="central" style="text-shadow: 2px 2px 3px rgba(0,0,0,0.5);">${pieceChar}</text>`;
             }
             
             // Add coordinates on all 4 sides (adjusted for rotation)
@@ -358,26 +291,11 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
     const svg = generateChessBoardSVG(game);
     const imagePath = path.join(tempDir, `board_${chatId}.png`);
     
-    // Convert SVG to PNG - ensure UTF-8 encoding
-    const svgBuffer = Buffer.from(svg, 'utf8');
-    
-    // Log for debugging
-    const boardState = game.board();
-    console.log('Generating board image, SVG length:', svg.length, 'Board size check:', boardState ? boardState.length : 'null');
-    
-    await sharp(svgBuffer, {
-        density: 144, // Higher DPI for better quality
-        limitInputPixels: false // Allow larger images
-    })
-    .resize(720, 720, {
-        fit: 'contain',
-        background: { r: 240, g: 217, b: 181, alpha: 1 } // Match board background
-    })
-    .png({
-        quality: 100,
-        compressionLevel: 1
-    })
-    .toFile(imagePath);
+    // Convert SVG to PNG
+    await sharp(Buffer.from(svg))
+        .resize(720, 720)
+        .png()
+        .toFile(imagePath);
     
     // Create inline keyboard for legal moves
     const moves = game.moves({ verbose: true });
