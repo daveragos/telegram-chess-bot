@@ -75,20 +75,20 @@ function loadPieceSvg(pieceKey) {
     if (pieceSvgCache.has(pieceKey)) {
         return pieceSvgCache.get(pieceKey);
     }
-    
+
     const svgFile = pieceSvgMap[pieceKey];
     if (!svgFile) {
         return null;
     }
-    
+
     const svgPath = path.join(__dirname, 'assets', 'pieces', svgFile);
-    
+
     try {
         if (!fs.existsSync(svgPath)) {
             console.warn(`SVG file not found: ${svgPath}`);
             return null;
         }
-        
+
         const svgContent = fs.readFileSync(svgPath, 'utf8');
         // Extract the inner content (everything between <svg> tags)
         // Match either self-closing or with closing tag
@@ -98,7 +98,7 @@ function loadPieceSvg(pieceKey) {
             pieceSvgCache.set(pieceKey, innerContent);
             return innerContent;
         }
-        
+
         return null;
     } catch (error) {
         console.error(`Error loading SVG for ${pieceKey}:`, error);
@@ -111,9 +111,9 @@ function canMakeMove(gameState) {
     if (!gameState.moveDelay || !gameState.moveDelay.enabled) {
         return true; // No delay, can move immediately
     }
-    
+
     const moveNumber = gameState.moveNumber || 0;
-    
+
     // If round is in progress (odd moveNumber = only one side moved), allow immediate move
     // moveNumber 0 = game start (white can move)
     // moveNumber 1 = white moved (black can move immediately)
@@ -121,18 +121,18 @@ function canMakeMove(gameState) {
     if (moveNumber % 2 === 1) {
         return true; // Round in progress, second player can move immediately
     }
-    
+
     // Round is complete (both sides moved), check timer
     if (!gameState.roundEndTime) {
         return true; // No timer set yet (shouldn't happen, but safe fallback)
     }
-    
+
     // Check if timer has expired
     const timeSinceRoundEnd = (Date.now() - gameState.roundEndTime) / 1000; // in seconds
     const roundNumber = Math.floor(moveNumber / 2);
     // First round (roundNumber=1) gets baseDelay only, subsequent rounds add increment
     const requiredDelay = gameState.moveDelay.baseDelay + (gameState.moveDelay.increment * (roundNumber - 1));
-    
+
     return timeSinceRoundEnd >= requiredDelay;
 }
 
@@ -141,25 +141,25 @@ function getRemainingDelay(gameState) {
     if (!gameState.moveDelay || !gameState.moveDelay.enabled) {
         return 0;
     }
-    
+
     const moveNumber = gameState.moveNumber || 0;
-    
+
     // If round is in progress (odd moveNumber), no delay needed
     if (moveNumber % 2 === 1) {
         return 0; // Round in progress, second player can move immediately
     }
-    
+
     // Round is complete, check timer
     if (!gameState.roundEndTime) {
         return 0;
     }
-    
+
     const roundNumber = Math.floor(moveNumber / 2);
     const timeSinceRoundEnd = (Date.now() - gameState.roundEndTime) / 1000;
     // First round (roundNumber=1) gets baseDelay only, subsequent rounds add increment
     const requiredDelay = gameState.moveDelay.baseDelay + (gameState.moveDelay.increment * (roundNumber - 1));
     const remaining = Math.max(0, requiredDelay - timeSinceRoundEnd);
-    
+
     return Math.ceil(remaining);
 }
 
@@ -172,13 +172,13 @@ function formatTime(seconds) {
     const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
-    
+
     const parts = [];
     if (days > 0) parts.push(`${days}d`);
     if (hours > 0) parts.push(`${hours}h`);
     if (minutes > 0 && days === 0) parts.push(`${minutes}m`); // Only show minutes if less than a day
     if (secs > 0 && days === 0 && hours === 0) parts.push(`${secs}s`); // Only show seconds if less than an hour
-    
+
     return parts.join(' ') || `${seconds}s`;
 }
 
@@ -191,10 +191,10 @@ function evaluatePosition(game) {
     if (game.isDraw() || game.isStalemate()) {
         return 0;
     }
-    
+
     const board = game.board();
     let evaluation = 0;
-    
+
     for (let rank = 0; rank < 8; rank++) {
         for (let file = 0; file < 8; file++) {
             const piece = board[rank][file];
@@ -202,7 +202,7 @@ function evaluatePosition(game) {
                 const value = pieceValues[piece.type.toUpperCase()] || 0;
                 // Add piece-square table bonuses for better positional awareness
                 let positionalBonus = 0;
-                
+
                 // Pawn structure bonus
                 if (piece.type === 'p' || piece.type === 'P') {
                     // Center pawns are more valuable
@@ -216,7 +216,7 @@ function evaluatePosition(game) {
                         positionalBonus += 0.1 * (4 - rank);
                     }
                 }
-                
+
                 // King safety - penalize exposed kings
                 if (piece.type === 'k' || piece.type === 'K') {
                     // Penalize king in center early game (simplified)
@@ -224,25 +224,25 @@ function evaluatePosition(game) {
                         positionalBonus = -0.5;
                     }
                 }
-                
+
                 const totalValue = value + positionalBonus;
                 evaluation += piece.color === 'w' ? totalValue : -totalValue;
             }
         }
     }
-    
+
     // Check bonus
     if (game.isCheck()) {
         evaluation += game.turn() === 'w' ? -0.5 : 0.5;
     }
-    
+
     return evaluation;
 }
 
 // Helper function to generate comprehensive game analytics
 async function generateGameAnalytics(gameState) {
     const { game, moveHistory, whiteTeam, blackTeam } = gameState;
-    
+
     // Initialize analytics data
     const analytics = {
         totalMoves: moveHistory.length,
@@ -257,7 +257,7 @@ async function generateGameAnalytics(gameState) {
         castling: { white: false, black: false },
         gameResult: null
     };
-    
+
     // Determine game result
     if (game.isCheckmate()) {
         analytics.gameResult = game.turn() === 'w' ? 'Black wins by checkmate' : 'White wins by checkmate';
@@ -268,7 +268,7 @@ async function generateGameAnalytics(gameState) {
     } else {
         analytics.gameResult = 'Game ended';
     }
-    
+
     // Initialize player stats
     [...whiteTeam, ...blackTeam].forEach(player => {
         analytics.playerStats[player] = {
@@ -281,20 +281,20 @@ async function generateGameAnalytics(gameState) {
             checks: 0
         };
     });
-    
+
     // Replay game to calculate evaluations
     const tempGame = new Chess();
     const moveEvaluations = [];
-    
+
     // Calculate evaluation for each move
     for (let i = 0; i < moveHistory.length; i++) {
         const moveData = moveHistory[i];
         const player = moveData.player;
         const side = i % 2 === 0 ? 'white' : 'black';
-        
+
         // Get evaluation before move
         const evaluationBefore = evaluatePosition(tempGame);
-        
+
         // Parse and make the move - use stored from/to if available, otherwise parse
         let from, to;
         if (moveData.from && moveData.to) {
@@ -309,15 +309,15 @@ async function generateGameAnalytics(gameState) {
                 continue; // Skip if we can't parse
             }
         }
-        
+
         try {
             const move = tempGame.move({ from, to });
             if (move) {
                 const evaluationAfter = evaluatePosition(tempGame);
-                const evaluationDelta = side === 'white' 
+                const evaluationDelta = side === 'white'
                     ? (evaluationAfter - evaluationBefore)
                     : (evaluationBefore - evaluationAfter); // Invert for black
-                
+
                 // Update player stats
                 if (!analytics.playerStats[player]) {
                     analytics.playerStats[player] = {
@@ -330,14 +330,14 @@ async function generateGameAnalytics(gameState) {
                         checks: 0
                     };
                 }
-                
+
                 analytics.playerStats[player].moves++;
                 if (side === 'white') {
                     analytics.playerStats[player].whiteMoves++;
                 } else {
                     analytics.playerStats[player].blackMoves++;
                 }
-                
+
                 if (move.captured) {
                     analytics.playerStats[player].captures++;
                     if (side === 'white') {
@@ -346,7 +346,7 @@ async function generateGameAnalytics(gameState) {
                         analytics.captures.black++;
                     }
                 }
-                
+
                 if (move.promotion) {
                     analytics.promotions.push({
                         player,
@@ -354,12 +354,12 @@ async function generateGameAnalytics(gameState) {
                         promotion: move.promotion.toUpperCase()
                     });
                 }
-                
+
                 if (move.inCheck) {
                     analytics.checks++;
                     analytics.playerStats[player].checks++;
                 }
-                
+
                 if (move.flags && move.flags.includes('k')) {
                     if (side === 'white') {
                         analytics.castling.white = true;
@@ -367,7 +367,7 @@ async function generateGameAnalytics(gameState) {
                         analytics.castling.black = true;
                     }
                 }
-                
+
                 moveEvaluations.push({
                     moveNumber: i + 1,
                     player,
@@ -384,13 +384,13 @@ async function generateGameAnalytics(gameState) {
             console.error('Error replaying move for analytics:', error);
         }
     }
-    
+
     // Find best moves (biggest positive evaluation changes)
     const sortedBestMoves = [...moveEvaluations]
         .filter(m => m.evaluationDelta > 0)
         .sort((a, b) => b.evaluationDelta - a.evaluationDelta)
         .slice(0, 5);
-    
+
     analytics.bestMoves = sortedBestMoves.map(m => ({
         move: m.move,
         player: m.player,
@@ -398,13 +398,13 @@ async function generateGameAnalytics(gameState) {
         improvement: m.evaluationDelta.toFixed(2),
         moveNumber: m.moveNumber
     }));
-    
+
     // Find blunders (biggest negative evaluation changes)
     const sortedBlunders = [...moveEvaluations]
         .filter(m => m.evaluationDelta < -1.0) // Only consider significant losses (>1 point)
         .sort((a, b) => a.evaluationDelta - b.evaluationDelta)
         .slice(0, 5);
-    
+
     analytics.blunders = sortedBlunders.map(m => ({
         move: m.move,
         player: m.player,
@@ -412,27 +412,27 @@ async function generateGameAnalytics(gameState) {
         loss: Math.abs(m.evaluationDelta).toFixed(2),
         moveNumber: m.moveNumber
     }));
-    
+
     // Update best moves and blunders count
     sortedBestMoves.forEach(m => {
         if (analytics.playerStats[m.player]) {
             analytics.playerStats[m.player].bestMoves++;
         }
     });
-    
+
     sortedBlunders.forEach(m => {
         if (analytics.playerStats[m.player]) {
             analytics.playerStats[m.player].blunders++;
         }
     });
-    
+
     return analytics;
 }
 
 // Helper function to export game data in PGN format (for external analysis)
 function exportGamePGN(gameState) {
     const { game, whiteTeam, blackTeam, moveHistory } = gameState;
-    
+
     // Create PGN headers
     const pgn = [];
     pgn.push(`[Event "Telegram Chess Bot Game"]`);
@@ -441,7 +441,7 @@ function exportGamePGN(gameState) {
     pgn.push(`[Round "1"]`);
     pgn.push(`[White "${whiteTeam.join(', ')}"]`);
     pgn.push(`[Black "${blackTeam.join(', ')}"]`);
-    
+
     // Add result
     if (game.isCheckmate()) {
         pgn.push(`[Result "${game.turn() === 'w' ? '0-1' : '1-0'}"]`);
@@ -450,43 +450,43 @@ function exportGamePGN(gameState) {
     } else {
         pgn.push(`[Result "*"]`);
     }
-    
+
     pgn.push(``);
-    
+
     // Export moves from chess.js (it handles PGN notation automatically)
     const pgnMoves = game.pgn();
     pgn.push(pgnMoves);
-    
+
     // Add result at the end
     if (game.isCheckmate()) {
         pgn.push(` ${game.turn() === 'w' ? '0-1' : '1-0'}`);
     } else if (game.isDraw() || game.isStalemate()) {
         pgn.push(` 1/2-1/2`);
     }
-    
+
     return pgn.join('\n');
 }
 
 // Helper function to export game data as JSON
 function exportGameJSON(gameState) {
     const { game, whiteTeam, blackTeam, moveHistory, capturedPieces } = gameState;
-    
+
     // Recreate full game history with detailed move info
     const tempGame = new Chess();
     const detailedMoves = [];
-    
+
     // Add initial position
     detailedMoves.push({
         moveNumber: 0,
         fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
         evaluation: evaluatePosition(tempGame)
     });
-    
+
     // Replay all moves
     for (let i = 0; i < moveHistory.length; i++) {
         const moveData = moveHistory[i];
         let from, to;
-        
+
         if (moveData.from && moveData.to) {
             from = moveData.from;
             to = moveData.to;
@@ -499,7 +499,7 @@ function exportGameJSON(gameState) {
                 continue;
             }
         }
-        
+
         try {
             const move = tempGame.move({ from, to });
             if (move) {
@@ -527,12 +527,12 @@ function exportGameJSON(gameState) {
             console.error('Error exporting move:', error);
         }
     }
-    
+
     const gameData = {
         metadata: {
             whiteTeam: whiteTeam || [],
             blackTeam: blackTeam || [],
-            result: game.isCheckmate() 
+            result: game.isCheckmate()
                 ? (game.turn() === 'w' ? '0-1' : '1-0')
                 : (game.isDraw() || game.isStalemate() ? '1/2-1/2' : '*'),
             totalMoves: moveHistory.length,
@@ -541,7 +541,7 @@ function exportGameJSON(gameState) {
         },
         moves: detailedMoves
     };
-    
+
     return JSON.stringify(gameData, null, 2);
 }
 
@@ -549,22 +549,22 @@ function exportGameJSON(gameState) {
 async function displayGameAnalytics(chatId, gameState) {
     try {
         const analytics = await generateGameAnalytics(gameState);
-        
+
         let report = `📊 GAME ANALYTICS REPORT 📊\n\n`;
         report += `═══════════════════════════════\n\n`;
-        
+
         // Game Result
         report += `🏆 RESULT: ${analytics.gameResult}\n`;
         report += `📈 Total Moves: ${analytics.totalMoves}\n\n`;
-        
+
         // Player Statistics
         report += `👥 PLAYER STATISTICS\n`;
         report += `─────────────────────\n\n`;
-        
+
         // Most active players
         const playersByMoves = Object.entries(analytics.playerStats)
             .sort((a, b) => b[1].moves - a[1].moves);
-        
+
         // White team moves
         const whitePlayers = playersByMoves
             .filter(([player]) => analytics.whiteTeam.includes(player))
@@ -574,7 +574,7 @@ async function displayGameAnalytics(chatId, gameState) {
                 stats
             }))
             .sort((a, b) => b.moves - a.moves);
-        
+
         if (whitePlayers.length > 0) {
             report += `⚪ WHITE TEAM:\n`;
             whitePlayers.forEach(({ player, moves, stats }, index) => {
@@ -585,7 +585,7 @@ async function displayGameAnalytics(chatId, gameState) {
             });
             report += `\n`;
         }
-        
+
         // Black team moves
         const blackPlayers = playersByMoves
             .filter(([player]) => analytics.blackTeam.includes(player))
@@ -595,7 +595,7 @@ async function displayGameAnalytics(chatId, gameState) {
                 stats
             }))
             .sort((a, b) => b.moves - a.moves);
-        
+
         if (blackPlayers.length > 0) {
             report += `⚫ BLACK TEAM:\n`;
             blackPlayers.forEach(({ player, moves, stats }, index) => {
@@ -606,49 +606,49 @@ async function displayGameAnalytics(chatId, gameState) {
             });
             report += `\n`;
         }
-        
+
         // Additional Statistics
         report += `📊 ADDITIONAL STATS\n`;
         report += `─────────────────────\n`;
         report += `Captures - White: ${analytics.captures.white}, Black: ${analytics.captures.black}\n`;
-        
+
         if (analytics.promotions.length > 0) {
             report += `Promotions: ${analytics.promotions.length}\n`;
             analytics.promotions.forEach(p => {
                 report += `  • ${p.player}: ${p.move} → ${p.promotion}\n`;
             });
         }
-        
+
         if (analytics.castling.white || analytics.castling.black) {
             report += `Castling: `;
             if (analytics.castling.white) report += `White `;
             if (analytics.castling.black) report += `Black`;
             report += `\n`;
         }
-        
+
         report += `Total Checks: ${analytics.checks}\n`;
-        
+
         report += `\n═══════════════════════════════\n`;
         report += `Thanks for playing! 🎉`;
-        
+
         // Send the report
         await bot.sendMessage(chatId, report);
-        
+
         // Export game data for external analysis
         const pgn = exportGamePGN(gameState);
         const json = exportGameJSON(gameState);
-        
+
         // Helper function to send export data
         const sendExportData = async (targetChatId) => {
             try {
                 // Send PGN (most external engines accept this)
-                await bot.sendMessage(targetChatId, 
+                await bot.sendMessage(targetChatId,
                     `📄 GAME DATA FOR EXTERNAL ANALYSIS\n\n` +
                     `Copy the PGN below to analyze with Stockfish, Lichess, Chess.com, etc:\n\n` +
                     `\`\`\`\n${pgn}\n\`\`\``,
                     { parse_mode: 'Markdown' }
                 );
-                
+
                 // Send JSON data (may be split if too long)
                 const maxMessageLength = 4000; // Telegram message limit is ~4096
                 if (json.length > maxMessageLength) {
@@ -680,7 +680,7 @@ async function displayGameAnalytics(chatId, gameState) {
                 console.error(`Error sending export data to ${targetChatId}:`, error);
                 // Fallback: send without markdown formatting if it fails
                 try {
-                    await bot.sendMessage(targetChatId, 
+                    await bot.sendMessage(targetChatId,
                         `📄 PGN Data:\n\n${pgn}\n\n📊 JSON Data:\n\n${json.substring(0, 4000)}${json.length > 4000 ? '...[truncated]' : ''}`
                     );
                 } catch (e) {
@@ -688,16 +688,16 @@ async function displayGameAnalytics(chatId, gameState) {
                 }
             }
         };
-        
+
         // Send export data to current user
         await sendExportData(chatId);
-        
+
         // Also send to channel if it's a channel game
         if (gameState.channelId && gameState.channelId !== String(chatId)) {
             await bot.sendMessage(gameState.channelId, report);
             await sendExportData(gameState.channelId);
         }
-        
+
         // Send to all joined users
         if (gameState.joinedUsers && gameState.joinedUsers.length > 0) {
             for (const userId of gameState.joinedUsers) {
@@ -711,7 +711,7 @@ async function displayGameAnalytics(chatId, gameState) {
                 }
             }
         }
-        
+
     } catch (error) {
         console.error('Error generating analytics:', error);
         bot.sendMessage(chatId, 'Error generating analytics report.');
@@ -723,46 +723,46 @@ function generateChessBoardSVG(game) {
     const board = game.board();
     const squareSize = 60;
     const boardSize = squareSize * 8;
-    const padding = 40; 
-    
+    const padding = 40;
+
     // Check if we should rotate the board (when it's Black's turn)
     const isBlackTurn = game.turn() === 'b';
-    
+
     let svg = `<svg width="${boardSize + (padding * 2) + 80}" height="${boardSize + (padding * 2) + 80}" xmlns="http://www.w3.org/2000/svg">`;
-    
+
     // Background
     svg += `<rect width="${boardSize + (padding * 2) + 80}" height="${boardSize + (padding * 2) + 80}" fill="#f0d9b5"/>`;
-    
+
     // Draw squares
     for (let rank = 0; rank < 8; rank++) {
         for (let file = 0; file < 8; file++) {
             // Calculate display position (rotated if Black's turn)
             const displayRank = isBlackTurn ? (7 - rank) : rank;
             const displayFile = isBlackTurn ? (7 - file) : file;
-            
+
             const isLight = (displayRank + displayFile) % 2 === 0;
             const color = isLight ? '#f0d9b5' : '#b58863';
             const x = file * squareSize + padding + 40;
             const y = rank * squareSize + padding + 40;
-            
+
             svg += `<rect x="${x}" y="${y}" width="${squareSize}" height="${squareSize}" fill="${color}"/>`;
-            
+
             // Add piece from the actual board position
             const square = board[displayRank][displayFile];
             if (square) {
                 // Get piece key for SVG lookup (uppercase for white, lowercase for black)
                 const pieceKey = square.color === 'w' ? square.type.toUpperCase() : square.type;
-                
+
                 // Try to load SVG content
                 const svgContent = loadPieceSvg(pieceKey);
-                
+
                 if (svgContent) {
                     // Embed SVG content with proper scaling and positioning
                     // SVG files are 45x45, we need to scale them to fit the square
                     const scale = squareSize / 45;
                     const centerX = x + squareSize / 2;
                     const centerY = y + squareSize / 2;
-                    
+
                     svg += `<g transform="translate(${centerX}, ${centerY}) scale(${scale}) translate(-22.5, -22.5)">`;
                     svg += svgContent;
                     svg += `</g>`;
@@ -772,7 +772,7 @@ function generateChessBoardSVG(game) {
                     svg += `<text x="${x + squareSize / 2}" y="${y + squareSize / 2}" font-size="${squareSize - 10}" fill="${square.color === 'w' ? 'white' : 'black'}" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" style="text-shadow: 2px 2px 3px rgba(0,0,0,0.5);">${pieceChar}</text>`;
                 }
             }
-            
+
             // Add coordinates on all 4 sides (adjusted for rotation)
             // Left side (ranks)
             if (file === 0) {
@@ -796,7 +796,7 @@ function generateChessBoardSVG(game) {
             }
         }
     }
-    
+
     svg += `</svg>`;
     return svg;
 }
@@ -806,9 +806,9 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
     const { game } = gameState;
     const isGameOver = game.isGameOver();
     const currentPlayer = game.turn() === 'w' ? 'White' : 'Black';
-    
+
     let statusMessage = '';
-    
+
     if (isGameOver) {
         if (game.isCheckmate()) {
             statusMessage = `🎯 Checkmate! ${currentPlayer === 'White' ? 'Black' : 'White'} wins!`;
@@ -822,13 +822,13 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
         if (game.isCheck()) {
             statusMessage += ' ⚠️ (Check!)';
         }
-        
+
         // Add timer status display
         if (gameState.moveDelay && gameState.moveDelay.enabled) {
             const moveNumber = gameState.moveNumber || 0;
             const remaining = getRemainingDelay(gameState);
             const isRoundInProgress = moveNumber % 2 === 1;
-            
+
             if (isRoundInProgress) {
                 // Round in progress - second player can move immediately (no timer)
                 const roundNumber = Math.floor(moveNumber / 2) + 1;
@@ -847,26 +847,26 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
             }
         }
     }
-    
+
     // Add captured pieces display
     if (gameState.capturedPieces) {
         const whiteCaptured = gameState.capturedPieces.white;
         const blackCaptured = gameState.capturedPieces.black;
-        
+
         if (whiteCaptured.length > 0 || blackCaptured.length > 0) {
             statusMessage += `\n\n📥 Captured:`;
-            
+
             // Calculate total values
             let whiteValue = 0;
             let blackValue = 0;
-            
+
             whiteCaptured.forEach(piece => {
                 whiteValue += pieceValues[piece] || 0;
             });
             blackCaptured.forEach(piece => {
                 blackValue += pieceValues[piece] || 0;
             });
-            
+
             // Display captured pieces
             if (whiteCaptured.length > 0) {
                 const pieceDisplay = whiteCaptured.map(p => pieceSymbols[p]).join('');
@@ -878,13 +878,13 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
             }
         }
     }
-    
+
     // Add move history if available
     if (gameState.moveHistory && gameState.moveHistory.length > 0) {
         const totalMoves = gameState.moveHistory.length;
         const recentMoves = gameState.moveHistory.slice(-5); // Show last 5 moves
         const startNum = Math.max(1, totalMoves - recentMoves.length + 1);
-        
+
         statusMessage += `\n\n📜 Recent moves (${totalMoves} total):`;
         recentMoves.forEach((move, index) => {
             const actualNum = startNum + index;
@@ -898,21 +898,21 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
             statusMessage += `\n... (${gameState.moveHistory.length - 5} earlier moves)`;
         }
     }
-    
+
     // Generate board image
     const svg = generateChessBoardSVG(game);
     const imagePath = path.join(tempDir, `board_${chatId}.png`);
-    
+
     // Convert SVG to PNG
     await sharp(Buffer.from(svg))
         .resize(720, 720)
         .png()
         .toFile(imagePath);
-    
+
     // Create inline keyboard for legal moves
     const moves = game.moves({ verbose: true });
     const keyboard = [];
-    
+
     if (moves.length > 0) {
         // Group moves into rows of 3 buttons
         for (let i = 0; i < moves.length; i += 3) {
@@ -926,29 +926,29 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
             keyboard.push(row);
         }
     }
-    
+
     // Add control buttons
     keyboard.push([
         { text: '🏠 Home', callback_data: 'home' },
         { text: '🔄 Refresh', callback_data: 'refresh' }
     ]);
-    
+
     // Add history button if there are moves
     if (gameState.moveHistory && gameState.moveHistory.length > 0) {
         keyboard.push([
             { text: '📜 Full History', callback_data: 'show_history' }
         ]);
     }
-    
+
     // Add resign button
     keyboard.push([
         { text: '❌ Resign', callback_data: 'resign' }
     ]);
-    
+
     const options = {
         caption: statusMessage
     };
-    
+
     // Add buttons if requested, or if this is a channel post (to show join link)
     if (withButtons || gameState.channelId) {
         // If this is a channel post and we don't have buttons yet, add just a join link
@@ -971,10 +971,10 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
     } else {
         console.log('No buttons created (withButtons=false) for chatId:', chatId);
     }
-    
+
     // Check if we need to update existing message (for channels)
     const imageStream = fs.createReadStream(imagePath);
-    
+
     if (gameState.channelMessageId && chatId === gameState.channelId) {
         // Update existing message in channel
         try {
@@ -982,12 +982,12 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
                 chat_id: chatId,
                 message_id: gameState.channelMessageId
             };
-            
+
             // Add reply_markup if we have it
             if (options.reply_markup) {
                 editOptions.reply_markup = options.reply_markup;
             }
-            
+
             await bot.editMessageMedia(
                 {
                     type: 'photo',
@@ -1004,14 +1004,14 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
     } else {
         // Send new message
         const sentMessage = await bot.sendPhoto(chatId, imageStream, options);
-        
+
         // If this is a channel message, store the message ID
         if (chatId < 0) { // Channel IDs are negative
             gameState.channelId = chatId;
             gameState.channelMessageId = sentMessage.message_id;
         }
     }
-    
+
     // Clean up old image after sending
     setTimeout(() => {
         if (fs.existsSync(imagePath)) {
@@ -1023,23 +1023,23 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
 // Helper function to handle joining a game
 async function handleGameJoin(channelId, chatId, username, team) {
     let gameState = activeGames.get(channelId);
-    
+
     if (!gameState) {
         bot.sendMessage(chatId, 'Game not found in memory. Please try again.');
         return;
     }
-    
+
     // Check if user is already in a team
     const isInWhiteTeam = gameState.whiteTeam.includes(username);
     const isInBlackTeam = gameState.blackTeam.includes(username);
-    
+
     if (isInWhiteTeam || isInBlackTeam) {
         const currentTeam = isInWhiteTeam ? 'White' : 'Black';
         bot.sendMessage(chatId, `✅ You're already joined on the ${currentTeam} team!\n\nRefreshing board...`);
         await showGameStatus(chatId, gameState, username);
         return;
     }
-    
+
     // Add user to the selected team
     if (team === 'white') {
         gameState.blackTeam = gameState.blackTeam.filter(p => p !== username);
@@ -1052,7 +1052,7 @@ async function handleGameJoin(channelId, chatId, username, team) {
             gameState.blackTeam.push(username);
         }
     }
-    
+
     // Add to players list
     if (!gameState.players) {
         gameState.players = [];
@@ -1060,10 +1060,10 @@ async function handleGameJoin(channelId, chatId, username, team) {
     if (!gameState.players.includes(username)) {
         gameState.players.push(username);
     }
-    
+
     // Store the connection
     userToChannel.set(String(chatId), channelId);
-    
+
     // Add user to joinedUsers list
     if (!gameState.joinedUsers) {
         gameState.joinedUsers = [];
@@ -1071,7 +1071,7 @@ async function handleGameJoin(channelId, chatId, username, team) {
     if (!gameState.joinedUsers.includes(chatId)) {
         gameState.joinedUsers.push(chatId);
     }
-    
+
     // Update the database
     await saveGame(db, {
         channelId: gameState.channelId,
@@ -1081,7 +1081,7 @@ async function handleGameJoin(channelId, chatId, username, team) {
         blackTeam: gameState.blackTeam,
         moveCount: gameState.game.history().length
     });
-    
+
     const teamIcon = team === 'white' ? '⚪' : '⚫';
     bot.sendMessage(chatId, `${teamIcon} ${username} joined the ${team === 'white' ? 'White' : 'Black'} team!\nWhite: ${gameState.whiteTeam.join(', ')}\nBlack: ${gameState.blackTeam.join(', ') || 'None'}`);
     await showGameStatus(chatId, gameState, username);
@@ -1093,17 +1093,17 @@ bot.on('callback_query', async (callbackQuery) => {
     const chatId = msg.chat.id;
     const data = callbackQuery.data;
     const username = callbackQuery.from.username || callbackQuery.from.first_name;
-    
+
     console.log('Callback query received:', {
         username,
         chatId,
         data,
         messageChatId: msg.chat.id
     });
-    
+
     // Acknowledge the callback
     bot.answerCallbackQuery(callbackQuery.id);
-    
+
     // Handle start menu buttons
     if (data === 'start_newgame') {
         // Check if a game already exists
@@ -1111,13 +1111,13 @@ bot.on('callback_query', async (callbackQuery) => {
             bot.sendMessage(chatId, 'There is already an active game. Click "Join Game" to join the current game.');
             return;
         }
-        
+
         const newGame = new Chess();
-        
+
         // Determine if this is a channel
         const isChannel = msg.chat.type === 'channel' || msg.chat.type === 'supergroup';
         const gameKey = isChannel ? String(chatId) : 'default';
-        
+
         activeGames.set(gameKey, {
             game: newGame,
             lastMove: null,
@@ -1139,34 +1139,35 @@ bot.on('callback_query', async (callbackQuery) => {
             lastMoveTime: null,
             roundEndTime: null
         });
+        const gameState1 = activeGames.get(gameKey);
         bot.sendMessage(chatId, `🎮 New game started by ${username}! Choose your side:`, {
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: '⚪ Join White', callback_data: 'join_white' }],
-                    [{ text: '⚫ Join Black', callback_data: 'join_black' }]
+                    [{ text: `⚪ Join White (${gameState1.whiteTeam.length} players)`, callback_data: 'join_white' }],
+                    [{ text: `⚫ Join Black (${gameState1.blackTeam.length} players)`, callback_data: 'join_black' }]
                 ]
             }
         });
         return;
     }
-    
+
     if (data === 'start_channel_game') {
         // Ask for channel username or ID
-        bot.sendMessage(chatId, 
+        bot.sendMessage(chatId,
             `📺 Start Game in Channel\n\n` +
             `Please provide the channel username or ID:\n` +
             `• For public channels: @channelname\n` +
             `• For private channels: -1001234567890\n\n` +
             `Example: @ragoose_dumps or just paste the channel invite link`
         );
-        
+
         // Store that we're waiting for channel info
         bot.once('message', async (channelMsg) => {
             if (channelMsg.chat.type !== 'private') return;
-            
+
             const channelInput = channelMsg.text.trim();
             let targetChannelId = null;
-            
+
             // Extract channel ID from various formats
             if (channelInput.startsWith('@')) {
                 // Username format
@@ -1182,15 +1183,15 @@ bot.on('callback_query', async (callbackQuery) => {
                 // Handle invite link
                 const parts = channelInput.split('/');
                 const identifier = parts[parts.length - 1];
-                
+
                 if (identifier.startsWith('+')) {
-                    bot.sendMessage(chatId, 
+                    bot.sendMessage(chatId,
                         'Please share the channel username (e.g., @channelname) instead of the private invite link.\n' +
                         'Or ask the channel admin to add @shared_chess_bot as admin, then try starting the game from the channel.'
                     );
                     return;
                 }
-                
+
                 try {
                     const chat = await bot.getChat('@' + identifier);
                     targetChannelId = chat.id;
@@ -1202,20 +1203,20 @@ bot.on('callback_query', async (callbackQuery) => {
                 // Numeric ID
                 targetChannelId = channelInput.startsWith('-') ? channelInput : '-' + channelInput;
             }
-            
+
             if (targetChannelId) {
                 try {
                     const gameKey = String(targetChannelId);
                     const gameExists = activeGames.has(gameKey);
                     await startGameInChannel(targetChannelId, username);
-                    
+
                     // Only send success message if a new game was started
                     if (!gameExists) {
                         bot.sendMessage(chatId, `✅ Game started in channel! Check it out.`);
                     }
                 } catch (error) {
                     console.error('Error starting game in channel:', error);
-                    bot.sendMessage(chatId, 
+                    bot.sendMessage(chatId,
                         `❌ Error starting game: ${error.message}\n\n` +
                         `Make sure:\n` +
                         `• Bot is admin of the channel\n` +
@@ -1224,37 +1225,37 @@ bot.on('callback_query', async (callbackQuery) => {
                 }
             }
         });
-        
+
         return;
     }
-    
+
     if (data === 'start_join') {
         // First check if there's a local game
         if (activeGames.has(chatId)) {
             const gameState = activeGames.get(chatId);
-            
+
             // Check if user already joined
             if (gameState.players.includes(username)) {
                 bot.sendMessage(chatId, `You're already in the game!`);
                 return;
             }
-            
+
             // Show side selection
             bot.sendMessage(chatId, `Choose your side:`, {
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '⚪ Join White', callback_data: 'join_white' }],
-                        [{ text: '⚫ Join Black', callback_data: 'join_black' }]
+                        [{ text: `⚪ Join White (${gameState.whiteTeam.length} players)`, callback_data: 'join_white' }],
+                        [{ text: `⚫ Join Black (${gameState.blackTeam.length} players)`, callback_data: 'join_black' }]
                     ]
                 }
             });
             return;
         }
-        
+
         // Query database for active games
         getActiveGames(db).then(games => {
             const keyboard = [];
-            
+
             if (games.length === 0) {
                 keyboard.push([{ text: '🎮 Start New Game', callback_data: 'start_newgame' }]);
                 bot.sendMessage(chatId, 'No active games found.', {
@@ -1262,35 +1263,35 @@ bot.on('callback_query', async (callbackQuery) => {
                 });
                 return;
             }
-            
+
             // Remove duplicates based on channelId
-            const uniqueGames = games.filter((game, index, self) => 
+            const uniqueGames = games.filter((game, index, self) =>
                 index === self.findIndex((g) => g.channelId === game.channelId)
             );
-            
+
             // Show active games
             let message = `🎮 Active Games (${uniqueGames.length}):\n\n`;
-            
+
             uniqueGames.forEach((game, index) => {
                 const whiteTeam = JSON.parse(game.whiteTeam || '[]');
                 const blackTeam = JSON.parse(game.blackTeam || '[]');
                 const channelName = game.channelName || `Game ${game.id}`;
-                
+
                 message += `${index + 1}. ${channelName}\n`;
                 message += `   ⚪ White: ${whiteTeam.length} player(s)\n`;
                 message += `   ⚫ Black: ${blackTeam.length} player(s)\n`;
                 message += `   🎯 Moves: ${game.moveCount}\n\n`;
-                
+
                 // Create button for each game
-                keyboard.push([{ 
-                    text: `${index + 1}. ${channelName}`, 
-                    callback_data: `join_game_${game.channelId}` 
+                keyboard.push([{
+                    text: `${index + 1}. ${channelName}`,
+                    callback_data: `join_game_${game.channelId}`
                 }]);
             });
-            
+
             // Add back button
             keyboard.push([{ text: '🔙 Back', callback_data: 'home' }]);
-            
+
             bot.sendMessage(chatId, message, {
                 reply_markup: { inline_keyboard: keyboard }
             });
@@ -1300,14 +1301,14 @@ bot.on('callback_query', async (callbackQuery) => {
         });
         return;
     }
-    
+
     // Handle joining a specific game from the list
     if (data.startsWith('join_game_')) {
         const channelId = data.replace('join_game_', '');
-        
+
         // Try to get game from active games
         let gameState = activeGames.get(channelId);
-        
+
         // If not in active games, try to load from database
         if (!gameState) {
             getGameByChannelId(db, channelId).then(dbGame => {
@@ -1315,20 +1316,20 @@ bot.on('callback_query', async (callbackQuery) => {
                     bot.sendMessage(chatId, 'Game not found.');
                     return;
                 }
-                
+
                 // Load the game state from database
                 const gameStateData = JSON.parse(dbGame.gameState);
                 const game = new Chess();
                 game.load(gameStateData.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
-                
+
                 // Reconstruct full game state with all required fields
                 const whiteTeam = JSON.parse(dbGame.whiteTeam || '[]');
                 const blackTeam = JSON.parse(dbGame.blackTeam || '[]');
-                
+
                 // Initialize move delay system
                 const baseDelay = 900; // Start with 15 minutes delay between rounds
                 const increment = 900; // Increase by 15 minutes each round (900 seconds = 15 minutes)
-                
+
                 gameState = {
                     game: game,
                     lastMove: null,
@@ -1352,18 +1353,18 @@ bot.on('callback_query', async (callbackQuery) => {
                     moveNumber: 0,
                     roundEndTime: null
                 };
-                
+
                 // Store in active games
                 activeGames.set(channelId, gameState);
-                
+
                 // Show side selection
-                bot.sendMessage(chatId, 
-                    `🎮 Joining: ${dbGame.channelName || `Game ${dbGame.id}`}\n\nChoose your side:`, 
+                bot.sendMessage(chatId,
+                    `🎮 Joining: ${dbGame.channelName || `Game ${dbGame.id}`}\n\nChoose your side:`,
                     {
                         reply_markup: {
                             inline_keyboard: [
-                                [{ text: '⚪ Join White', callback_data: `join_game_white_${channelId}` }],
-                                [{ text: '⚫ Join Black', callback_data: `join_game_black_${channelId}` }]
+                                [{ text: `⚪ Join White (${gameState.whiteTeam.length} players)`, callback_data: `join_game_white_${channelId}` }],
+                                [{ text: `⚫ Join Black (${gameState.blackTeam.length} players)`, callback_data: `join_game_black_${channelId}` }]
                             ]
                         }
                     }
@@ -1374,49 +1375,49 @@ bot.on('callback_query', async (callbackQuery) => {
             });
             return;
         }
-        
+
         // Game is in active games, show side selection
-        bot.sendMessage(chatId, 
-            `🎮 Joining: ${gameState.channelName || channelId}\n\nChoose your side:`, 
+        bot.sendMessage(chatId,
+            `🎮 Joining: ${gameState.channelName || channelId}\n\nChoose your side:`,
             {
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '⚪ Join White', callback_data: `join_game_white_${channelId}` }],
-                        [{ text: '⚫ Join Black', callback_data: `join_game_black_${channelId}` }]
+                        [{ text: `⚪ Join White (${gameState.whiteTeam.length} players)`, callback_data: `join_game_white_${channelId}` }],
+                        [{ text: `⚫ Join Black (${gameState.blackTeam.length} players)`, callback_data: `join_game_black_${channelId}` }]
                     ]
                 }
             }
         );
         return;
     }
-    
+
     // Handle joining white team for a selected game
     if (data.startsWith('join_game_white_')) {
         const channelId = data.replace('join_game_white_', '');
         console.log('Attempting to join white team:', { channelId, chatId, username });
-        
+
         // Check if game is in active games
         if (!activeGames.has(channelId)) {
             bot.sendMessage(chatId, 'Game not found in memory. Loading from database...');
-            
+
             // Try to load from database
             getGameByChannelId(db, channelId).then(dbGame => {
                 if (!dbGame) {
                     bot.sendMessage(chatId, 'Game not found.');
                     return;
                 }
-                
+
                 const gameStateData = JSON.parse(dbGame.gameState);
                 const game = new Chess();
                 game.load(gameStateData.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
-                
+
                 const whiteTeam = JSON.parse(dbGame.whiteTeam || '[]');
                 const blackTeam = JSON.parse(dbGame.blackTeam || '[]');
-                
+
                 // Initialize time control
                 const initialTime = 300;
                 const increment = 3;
-                
+
                 const gameState = {
                     game: game,
                     lastMove: null,
@@ -1442,9 +1443,9 @@ bot.on('callback_query', async (callbackQuery) => {
                     },
                     timerInterval: null
                 };
-                
+
                 activeGames.set(channelId, gameState);
-                
+
                 // Now join
                 handleGameJoin(channelId, chatId, username, 'white');
             }).catch(error => {
@@ -1453,38 +1454,38 @@ bot.on('callback_query', async (callbackQuery) => {
             });
             return;
         }
-        
+
         handleGameJoin(channelId, chatId, username, 'white');
         return;
     }
-    
+
     // Handle joining black team for a selected game
     if (data.startsWith('join_game_black_')) {
         const channelId = data.replace('join_game_black_', '');
         console.log('Attempting to join black team:', { channelId, chatId, username });
-        
+
         // Check if game is in active games
         if (!activeGames.has(channelId)) {
             bot.sendMessage(chatId, 'Game not found in memory. Loading from database...');
-            
+
             // Try to load from database
             getGameByChannelId(db, channelId).then(dbGame => {
                 if (!dbGame) {
                     bot.sendMessage(chatId, 'Game not found.');
                     return;
                 }
-                
+
                 const gameStateData = JSON.parse(dbGame.gameState);
                 const game = new Chess();
                 game.load(gameStateData.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
-                
+
                 const whiteTeam = JSON.parse(dbGame.whiteTeam || '[]');
                 const blackTeam = JSON.parse(dbGame.blackTeam || '[]');
-                
+
                 // Initialize time control
                 const initialTime = 300;
                 const increment = 3;
-                
+
                 const gameState = {
                     gameэффици: game,
                     lastMove: null,
@@ -1510,9 +1511,9 @@ bot.on('callback_query', async (callbackQuery) => {
                     },
                     timerInterval: null
                 };
-                
+
                 activeGames.set(channelId, gameState);
-                
+
                 // Now join
                 handleGameJoin(channelId, chatId, username, 'black');
             }).catch(error => {
@@ -1521,11 +1522,11 @@ bot.on('callback_query', async (callbackQuery) => {
             });
             return;
         }
-        
+
         handleGameJoin(channelId, chatId, username, 'black');
         return;
     }
-    
+
     // Handle joining white team for channel game
     if (data.startsWith('join_channel_white_')) {
         const channelId = data.replace('join_channel_white_', '');
@@ -1534,20 +1535,20 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
         const gameState = activeGames.get(channelId);
-        
+
         // Check if user is already in a team
         const isInWhiteTeam = gameState.whiteTeam.includes(username);
         const isInBlackTeam = gameState.blackTeam.includes(username);
-        
+
         if (isInWhiteTeam || isInBlackTeam) {
             const currentTeam = isInWhiteTeam ? 'White' : 'Black';
             bot.sendMessage(chatId, `✅ You're already joined on the ${currentTeam} team!\n\nRefreshing board...`);
-            
+
             // Make sure userToChannel is set for existing players
             if (!userToChannel.has(String(chatId))) {
                 userToChannel.set(String(chatId), channelId);
             }
-            
+
             // Make sure user is in joinedUsers list
             if (!gameState.joinedUsers) {
                 gameState.joinedUsers = [];
@@ -1555,27 +1556,27 @@ bot.on('callback_query', async (callbackQuery) => {
             if (!gameState.joinedUsers.includes(chatId)) {
                 gameState.joinedUsers.push(chatId);
             }
-            
+
             await showGameStatus(chatId, gameState, username);
             return;
         }
-        
+
         // Remove from black team if they were there
         gameState.blackTeam = gameState.blackTeam.filter(p => p !== username);
-        
+
         // Add to white team if not already there
         if (!gameState.whiteTeam.includes(username)) {
             gameState.whiteTeam.push(username);
         }
-        
+
         // Add to players list
         if (!gameState.players.includes(username)) {
             gameState.players.push(username);
         }
-        
+
         // Store the connection
         userToChannel.set(String(chatId), channelId);
-        
+
         // Add user to joinedUsers list to receive updates
         if (!gameState.joinedUsers) {
             gameState.joinedUsers = [];
@@ -1583,7 +1584,7 @@ bot.on('callback_query', async (callbackQuery) => {
         if (!gameState.joinedUsers.includes(chatId)) {
             gameState.joinedUsers.push(chatId);
         }
-        
+
         // Save to database
         await saveGame(db, {
             channelId: gameState.channelId,
@@ -1593,14 +1594,14 @@ bot.on('callback_query', async (callbackQuery) => {
             blackTeam: gameState.blackTeam,
             moveCount: gameState.game.history().length
         });
-        
+
         bot.sendMessage(chatId, `⚪ ${username} joined the White team in the channel game!\nWhite: ${gameState.whiteTeam.join(', ')}\nBlack: ${gameState.blackTeam.join(', ') || 'None'}`);
         await showGameStatus(chatId, gameState, username);
-        
+
         // Don't update channel board on join - keep channel clean
         return;
     }
-    
+
     // Handle joining black team for channel game
     if (data.startsWith('join_channel_black_')) {
         const channelId = data.replace('join_channel_black_', '');
@@ -1609,20 +1610,20 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
         const gameState = activeGames.get(channelId);
-        
+
         // Check if user is already in a team
         const isInWhiteTeam = gameState.whiteTeam.includes(username);
         const isInBlackTeam = gameState.blackTeam.includes(username);
-        
+
         if (isInWhiteTeam || isInBlackTeam) {
             const currentTeam = isInWhiteTeam ? 'White' : 'Black';
             bot.sendMessage(chatId, `✅ You're already joined on the ${currentTeam} team!\n\nRefreshing board...`);
-            
+
             // Make sure userToChannel is set for existing players
             if (!userToChannel.has(String(chatId))) {
                 userToChannel.set(String(chatId), channelId);
             }
-            
+
             // Make sure user is in joinedUsers list
             if (!gameState.joinedUsers) {
                 gameState.joinedUsers = [];
@@ -1630,27 +1631,27 @@ bot.on('callback_query', async (callbackQuery) => {
             if (!gameState.joinedUsers.includes(chatId)) {
                 gameState.joinedUsers.push(chatId);
             }
-            
+
             await showGameStatus(chatId, gameState, username);
             return;
         }
-        
+
         // Remove from white team if they were there
         gameState.whiteTeam = gameState.whiteTeam.filter(p => p !== username);
-        
+
         // Add to black team if not already there
         if (!gameState.blackTeam.includes(username)) {
             gameState.blackTeam.push(username);
         }
-        
+
         // Add to players list
         if (!gameState.players.includes(username)) {
             gameState.players.push(username);
         }
-        
+
         // Store the connection
         userToChannel.set(String(chatId), channelId);
-        
+
         // Add user to joinedUsers list to receive updates
         if (!gameState.joinedUsers) {
             gameState.joinedUsers = [];
@@ -1658,7 +1659,7 @@ bot.on('callback_query', async (callbackQuery) => {
         if (!gameState.joinedUsers.includes(chatId)) {
             gameState.joinedUsers.push(chatId);
         }
-        
+
         // Save to database
         await saveGame(db, {
             channelId: gameState.channelId,
@@ -1668,14 +1669,14 @@ bot.on('callback_query', async (callbackQuery) => {
             blackTeam: gameState.blackTeam,
             moveCount: gameState.game.history().length
         });
-        
+
         bot.sendMessage(chatId, `⚫ ${username} joined the Black team in the channel game!\nWhite: ${gameState.whiteTeam.join(', ') || 'None'}\nBlack: ${gameState.blackTeam.join(', ')}`);
         await showGameStatus(chatId, gameState, username);
-        
+
         // Don't update channel board on join - keep channel clean
         return;
     }
-    
+
     // Handle joining white team
     if (data === 'join_white') {
         if (!activeGames.has(chatId)) {
@@ -1683,25 +1684,25 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
         const gameState = activeGames.get(chatId);
-        
+
         // Remove from black team if they were there
         gameState.blackTeam = gameState.blackTeam.filter(p => p !== username);
-        
+
         // Add to white team if not already there
         if (!gameState.whiteTeam.includes(username)) {
             gameState.whiteTeam.push(username);
         }
-        
+
         // Add to players list
         if (!gameState.players.includes(username)) {
             gameState.players.push(username);
         }
-        
+
         bot.sendMessage(chatId, `⚪ ${username} joined the White team!\nWhite: ${gameState.whiteTeam.join(', ')}\nBlack: ${gameState.blackTeam.join(', ') || 'None'}`);
         await showGameStatus(chatId, gameState, username);
         return;
     }
-    
+
     // Handle joining black team
     if (data === 'join_black') {
         if (!activeGames.has(chatId)) {
@@ -1709,23 +1710,23 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
         const gameState = activeGames.get(chatId);
-        
+
         // Remove from white team if they were there
         gameState.whiteTeam = gameState.whiteTeam.filter(p => p !== username);
-        
+
         // Add to black team if not already there
         gameState.blackTeam.push(username);
-        
+
         // Add to players list
         if (!gameState.players.includes(username)) {
             gameState.players.push(username);
         }
-        
+
         bot.sendMessage(chatId, `⚫ ${username} joined the Black team!\nWhite: ${gameState.whiteTeam.join(', ') || 'None'}\nBlack: ${gameState.blackTeam.join(', ')}`);
         await showGameStatus(chatId, gameState, username);
         return;
     }
-    
+
     if (data === 'start_help') {
         const keyboard = [
             [
@@ -1736,7 +1737,7 @@ bot.on('callback_query', async (callbackQuery) => {
                 { text: '📚 Help', callback_data: 'start_help' }
             ]
         ];
-        
+
         bot.sendMessage(chatId,
             `📚 Chess Bot Commands:\n\n` +
             `Button Commands:\n` +
@@ -1759,11 +1760,11 @@ bot.on('callback_query', async (callbackQuery) => {
         );
         return;
     }
-    
+
     // Handle game-related buttons (need active game)
     // Check if there's a game for this chatId or if user is connected to a channel game
     const hasGame = activeGames.has(chatId) || userToChannel.has(String(chatId));
-    
+
     if (!hasGame) {
         // Only show no game message for refresh/resign, not for home
         if (data === 'refresh' || data === 'resign') {
@@ -1774,7 +1775,7 @@ bot.on('callback_query', async (callbackQuery) => {
         }
         return;
     }
-    
+
     // Handle different button actions
     if (data === 'home') {
         const keyboard = [
@@ -1786,20 +1787,20 @@ bot.on('callback_query', async (callbackQuery) => {
                 { text: '📚 Help', callback_data: 'start_help' }
             ]
         ];
-        
+
         const options = {
             reply_markup: {
                 inline_keyboard: keyboard
             }
         };
-        
-        bot.sendMessage(chatId, 
+
+        bot.sendMessage(chatId,
             `🏠 Main Menu\n\nChoose an option:`,
             options
         );
         return;
     }
-    
+
     if (data === 'refresh') {
         // Get the game state - check if user is connected to a channel game first
         let targetGameState = null;
@@ -1811,16 +1812,16 @@ bot.on('callback_query', async (callbackQuery) => {
         } else if (activeGames.has(String(chatId))) {
             targetGameState = activeGames.get(String(chatId));
         }
-        
+
         if (!targetGameState) {
             bot.sendMessage(chatId, 'No active game found.');
             return;
         }
-        
+
         await showGameStatus(chatId, targetGameState, username);
         return;
     }
-    
+
     if (data === 'show_history') {
         // Get the game state - check if user is connected to a channel game first
         let targetGameState = null;
@@ -1832,17 +1833,17 @@ bot.on('callback_query', async (callbackQuery) => {
         } else if (activeGames.has(String(chatId))) {
             targetGameState = activeGames.get(String(chatId));
         }
-        
+
         if (!targetGameState) {
             bot.sendMessage(chatId, 'No active game found.');
             return;
         }
-        
+
         if (!targetGameState.moveHistory || targetGameState.moveHistory.length === 0) {
             bot.sendMessage(chatId, 'No moves yet!');
             return;
         }
-        
+
         let historyText = `📜 Full Move History (${targetGameState.moveHistory.length} moves):\n\n`;
         targetGameState.moveHistory.forEach((move) => {
             let moveText = `${move.number}. ${move.player}: ${move.move}`;
@@ -1851,20 +1852,22 @@ bot.on('callback_query', async (callbackQuery) => {
             }
             historyText += moveText + '\n';
         });
-        
-        // Add team information
-        historyText += `\n⚪ White Team: ${targetGameState.whiteTeam.join(', ') || 'None'}`;
-        historyText += `\n⚫ Black Team: ${targetGameState.blackTeam.join(', ') || 'None'}`;
-        
+
+        // Add team information with counts
+        const whiteTeamCount = targetGameState.whiteTeam.length;
+        const blackTeamCount = targetGameState.blackTeam.length;
+        historyText += `\n⚪ White Team (${whiteTeamCount} player${whiteTeamCount !== 1 ? 's' : ''}): ${targetGameState.whiteTeam.join(', ') || 'None'}`;
+        historyText += `\n⚫ Black Team (${blackTeamCount} player${blackTeamCount !== 1 ? 's' : ''}): ${targetGameState.blackTeam.join(', ') || 'None'}`;
+
         bot.sendMessage(chatId, historyText);
         return;
     }
-    
+
     if (data === 'resign') {
         // Get the game state - check if user is connected to a channel game first
         let gameState = null;
         let gameKey = null;
-        
+
         if (userToChannel.has(String(chatId))) {
             const channelId = userToChannel.get(String(chatId));
             gameKey = channelId;
@@ -1875,16 +1878,16 @@ bot.on('callback_query', async (callbackQuery) => {
             gameKey = String(chatId);
             gameState = activeGames.get(String(chatId));
         }
-        
+
         if (!gameState || !gameKey) {
             bot.sendMessage(chatId, 'No active game found.');
             return;
         }
-        
+
         // Determine which team the user is on
         let userTeam = null;
         let teamName = '';
-        
+
         if (gameState.whiteTeam.includes(username)) {
             userTeam = gameState.resignVotes.white;
             teamName = 'White';
@@ -1895,28 +1898,28 @@ bot.on('callback_query', async (callbackQuery) => {
             bot.sendMessage(chatId, `❌ You must join a team first to vote!`);
             return;
         }
-        
+
         // Add vote if not already voted
         if (!userTeam.includes(username)) {
             userTeam.push(username);
-            
+
             // Count team members and votes
             const teamPlayers = teamName === 'White' ? gameState.whiteTeam.length : gameState.blackTeam.length;
             const voteCount = userTeam.length;
             const majorityNeeded = Math.ceil(teamPlayers / 2); // More than half
-            
+
             if (voteCount >= majorityNeeded) {
                 // Majority reached - end game
                 // Show analytics before deleting
                 await displayGameAnalytics(chatId, gameState);
-                
+
                 activeGames.delete(gameKey);
-                
+
                 // Delete from database if it's a channel game
                 if (gameState.channelId) {
                     await deleteGame(db, gameState.channelId);
                 }
-                
+
                 bot.sendMessage(chatId, `🏳️ ${teamName} team resigned (${voteCount}/${teamPlayers} votes). Game ended.`);
             } else {
                 bot.sendMessage(chatId, `🖐️ ${username} voted to resign.\n${teamName} team: ${voteCount}/${majorityNeeded} votes needed (${teamPlayers} total players)`);
@@ -1926,24 +1929,24 @@ bot.on('callback_query', async (callbackQuery) => {
         }
         return;
     }
-    
+
     if (data.startsWith('move_')) {
         console.log('Entering move handler for:', data);
-        
+
         // Only allow moves from private chats
         if (msg.chat.type !== 'private') {
             console.log('Rejected: not a private chat');
-            bot.answerCallbackQuery(callbackQuery.id, { 
+            bot.answerCallbackQuery(callbackQuery.id, {
                 text: 'Moves can only be made from private chat with the bot',
-                show_alert: true 
+                show_alert: true
             });
             return;
         }
-        
+
         // Get the game state - check if user is connected to a channel game first
         let targetGameState = null;
         let targetGame = null;
-        
+
         if (userToChannel.has(String(chatId))) {
             const channelId = userToChannel.get(String(chatId));
             if (activeGames.has(channelId)) {
@@ -1954,15 +1957,15 @@ bot.on('callback_query', async (callbackQuery) => {
             targetGameState = activeGames.get(String(chatId));
             targetGame = targetGameState.game;
         }
-        
+
         if (!targetGameState || !targetGame) {
             console.log('No game found. userToChannel has user?', userToChannel.has(String(chatId)));
             bot.sendMessage(chatId, 'No active game found.');
             return;
         }
-        
+
         console.log('Game found successfully');
-        
+
         // Check if game is over
         if (targetGame.isGameOver()) {
             const keyboard = [[{ text: '🎮 Start New Game', callback_data: 'start_newgame' }]];
@@ -1971,7 +1974,7 @@ bot.on('callback_query', async (callbackQuery) => {
             });
             return;
         }
-        
+
         // Check if user has joined any team
         console.log('Move attempt - checking team membership:', {
             username,
@@ -1980,21 +1983,21 @@ bot.on('callback_query', async (callbackQuery) => {
             hasWhite: targetGameState.whiteTeam.includes(username),
             hasBlack: targetGameState.blackTeam.includes(username)
         });
-        
+
         const hasJoinedTeam = targetGameState.whiteTeam.includes(username) || targetGameState.blackTeam.includes(username);
         if (!hasJoinedTeam) {
             console.log('User not found in any team');
             bot.sendMessage(chatId, `❌ You must join a team first! Use "Join Game" to choose White or Black.`);
             return;
         }
-        
+
         // Check if enough time has passed since last round ended
         if (!canMakeMove(targetGameState)) {
             const remaining = getRemainingDelay(targetGameState);
             const formattedTime = formatTime(remaining);
             const moveNumber = targetGameState.moveNumber || 0;
             const roundNumber = Math.floor(moveNumber / 2);
-            bot.sendMessage(chatId, 
+            bot.sendMessage(chatId,
                 `⏳ Timer is still counting down!\n\n` +
                 `Round ${roundNumber} is complete. Please wait ${formattedTime} for the timer to expire before starting round ${roundNumber + 1}.\n\n` +
                 `(Both sides must wait after completing a round)`
@@ -2002,48 +2005,48 @@ bot.on('callback_query', async (callbackQuery) => {
             await showGameStatus(chatId, targetGameState, username);
             return;
         }
-        
+
         // Check if user is on the correct team
         const currentSide = targetGame.turn() === 'w' ? 'white' : 'black';
         const team = currentSide === 'white' ? targetGameState.whiteTeam : targetGameState.blackTeam;
-        
+
         if (!team.includes(username)) {
             const currentPlayer = currentSide === 'white' ? 'White' : 'Black';
             bot.sendMessage(chatId, `❌ It's ${currentPlayer}'s turn, but you're on the other team!`);
             await showGameStatus(chatId, targetGameState, username);
             return;
         }
-        
+
         // Extract move notation
         const moveNotation = data.replace('move_', '');
-        
+
         try {
             // Try to make the move
             const move = targetGame.move(moveNotation);
-            
+
             if (!move) {
                 bot.sendMessage(chatId, `❌ Invalid move: ${moveNotation}`);
                 await showGameStatus(chatId, targetGameState, username);
                 return;
             }
-            
+
             // Move was successful
             targetGameState.lastMove = {
                 player: username,
                 move: moveNotation,
                 timestamp: new Date()
             };
-            
+
             // Update move tracking
             targetGameState.lastMoveTime = Date.now();
             targetGameState.moveNumber = (targetGameState.moveNumber || 0) + 1;
-            
+
             // If round is complete (both sides moved), start the timer
             // moveNumber is now even (2, 4, 6...) = both sides have moved
             if (targetGameState.moveNumber % 2 === 0) {
                 targetGameState.roundEndTime = Date.now();
             }
-            
+
             // Track captured pieces
             if (move.captured) {
                 const capturedPiece = move.captured;
@@ -2051,7 +2054,7 @@ bot.on('callback_query', async (callbackQuery) => {
                 const capturedSide = capturingSide === 'w' ? 'black' : 'white';
                 targetGameState.capturedPieces[capturedSide].push(capturedPiece);
             }
-            
+
             // Add move to history with full details for analytics
             if (!targetGameState.moveHistory) {
                 targetGameState.moveHistory = [];
@@ -2068,11 +2071,11 @@ bot.on('callback_query', async (callbackQuery) => {
                 flags: move.flags || '',
                 timestamp: Date.now()
             });
-            
-            const moveDescription = move.captured ? 
-                `${move.from} → ${move.to} captures ${pieceSymbols[move.captured]}` : 
+
+            const moveDescription = move.captured ?
+                `${move.from} → ${move.to} captures ${pieceSymbols[move.captured]}` :
                 `${move.from} → ${move.to}`;
-            
+
             // Save to database if this is a channel game
             if (targetGameState.channelId) {
                 await saveGame(db, {
@@ -2083,7 +2086,7 @@ bot.on('callback_query', async (callbackQuery) => {
                     blackTeam: targetGameState.blackTeam,
                     moveCount: targetGame.history().length
                 });
-                
+
                 // If game is over, delete from database and show analytics
                 if (targetGame.isGameOver()) {
                     await deleteGame(db, targetGameState.channelId);
@@ -2091,10 +2094,10 @@ bot.on('callback_query', async (callbackQuery) => {
                     await displayGameAnalytics(chatId, targetGameState);
                 }
             }
-            
+
             // Notify about the move
             let moveNotification = `✅ ${username} played: ${moveDescription}`;
-            
+
             // If round just completed (both sides moved), inform players timer has started
             if (targetGameState.moveNumber % 2 === 0 && targetGameState.moveDelay && targetGameState.moveDelay.enabled) {
                 const roundNumber = Math.floor(targetGameState.moveNumber / 2);
@@ -2103,22 +2106,22 @@ bot.on('callback_query', async (callbackQuery) => {
                 const formattedTime = formatTime(timeLimit);
                 moveNotification += `\n\n⏰ Round ${roundNumber} complete! Timer started: ${formattedTime} before next round`;
             }
-            
+
             bot.sendMessage(chatId, moveNotification);
-            
+
             // Show updated board in private chat
             await showGameStatus(chatId, targetGameState, username);
-            
+
             // Check if game ended and show analytics
             if (targetGame.isGameOver()) {
                 await displayGameAnalytics(chatId, targetGameState);
             }
-            
+
             // Also update channel board if this is a channel game
             if (targetGameState.channelId) {
                 await showGameStatus(targetGameState.channelId, targetGameState, username, false);
             }
-            
+
             // Send updates to all users who joined via deep link
             if (targetGameState.joinedUsers && targetGameState.joinedUsers.length > 0) {
                 for (const userId of targetGameState.joinedUsers) {
@@ -2135,7 +2138,7 @@ bot.on('callback_query', async (callbackQuery) => {
                     }
                 }
             }
-            
+
         } catch (error) {
             bot.sendMessage(chatId, `❌ Error: ${error.message}`);
             await showGameStatus(chatId, targetGameState, username);
@@ -2147,8 +2150,8 @@ bot.on('callback_query', async (callbackQuery) => {
 function getLegalMovesList(game) {
     const moves = game.moves({ verbose: true });
     if (moves.length === 0) return 'No legal moves available.';
-    
-    return moves.map(move => 
+
+    return moves.map(move =>
         `${move.from}${move.to}${move.promotion ? `=${move.promotion.toUpperCase()}` : ''}`
     ).join(', ');
 }
@@ -2156,18 +2159,18 @@ function getLegalMovesList(game) {
 // Helper function to handle new game in channel
 async function startGameInChannel(channelId, username) {
     const gameKey = String(channelId);
-    
+
     // Check if a game already exists - don't post to channel, just return
     if (activeGames.has(gameKey)) {
         return;
     }
-    
+
     // Create a new game
     const newGame = new Chess();
     // Initialize move delay system
     const baseDelay = 900; // Start with 15 minutes delay between rounds
     const increment = 900; // Increase by 15 minutes each round (900 seconds = 15 minutes)
-    
+
     activeGames.set(gameKey, {
         game: newGame,
         lastMove: null,
@@ -2190,7 +2193,7 @@ async function startGameInChannel(channelId, username) {
         moveNumber: 0,
         roundEndTime: null
     });
-    
+
     // Get channel name for database
     let channelName = channelId;
     try {
@@ -2200,7 +2203,7 @@ async function startGameInChannel(channelId, username) {
     } catch (error) {
         console.error('Error getting channel info:', error);
     }
-    
+
     // Save to database
     await saveGame(db, {
         channelId: String(channelId),
@@ -2210,15 +2213,15 @@ async function startGameInChannel(channelId, username) {
         blackTeam: [],
         moveCount: 0
     });
-    
+
     // Show the board in channel
     await showGameStatus(channelId, activeGames.get(gameKey), username, false);
-    
+
     // Send instructions with deep link
     const botInfo = await bot.getMe();
     const deepLink = `https://t.me/${botInfo.username}?start=channel_${channelId}`;
-    
-    await bot.sendMessage(channelId, 
+
+    await bot.sendMessage(channelId,
         `🎮 Chess Game Started! 🎮\n\n` +
         `📱 Click "Join & Play" on the board above to start playing! 👆\n\n` +
         `⚪ White plays first!\n` +
@@ -2242,36 +2245,36 @@ bot.onText(/\/start(.*)/, (msg, match) => {
     const chatId = msg.chat.id;
     const username = msg.from?.username || msg.from?.first_name || 'Unknown';
     const param = match[1]?.trim(); // Get parameter from deep link
-    
+
     console.log('/start command received', { chatId, username, param });
-    
+
     // Check if this is a deep link to join a specific channel game
     if (param && param.startsWith('channel_')) {
         const targetChannelId = param.replace('channel_', '');
-        
+
         if (activeGames.has(targetChannelId)) {
             const gameState = activeGames.get(targetChannelId);
-            
+
             // Show side selection for this channel's game
             bot.sendMessage(chatId, `🎮 Join the channel game! Choose your side:`, {
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '⚪ Join White', callback_data: `join_channel_white_${targetChannelId}` }],
-                        [{ text: '⚫ Join Black', callback_data: `join_channel_black_${targetChannelId}` }]
+                        [{ text: `⚪ Join White (${gameState.whiteTeam.length} players)`, callback_data: `join_channel_white_${targetChannelId}` }],
+                        [{ text: `⚫ Join Black (${gameState.blackTeam.length} players)`, callback_data: `join_channel_black_${targetChannelId}` }]
                     ]
                 }
             });
-            
+
             // Store the channel connection
             userToChannel.set(String(chatId), targetChannelId);
-            
+
             return;
         } else {
             bot.sendMessage(chatId, '❌ Game not found. It may have ended or the link is invalid.');
             return;
         }
     }
-    
+
     const keyboard = [
         [
             { text: '🎮 New Game', callback_data: 'start_newgame' },
@@ -2284,26 +2287,26 @@ bot.onText(/\/start(.*)/, (msg, match) => {
             { text: '📚 Help', callback_data: 'start_help' }
         ]
     ];
-    
+
     const options = {
         reply_markup: {
             inline_keyboard: keyboard
         }
     };
-    
+
     // If there's an active game, auto-join the user
     if (activeGames.has(chatId)) {
         const gameState = activeGames.get(chatId);
         if (!gameState.players.includes(username)) {
             gameState.players.push(username);
         }
-        bot.sendMessage(chatId, 
+        bot.sendMessage(chatId,
             `👋 Welcome back, ${username}!\n\nThere's an active game. Here's the current board:`,
             options
         );
         showGameStatus(chatId, gameState, username);
     } else {
-        bot.sendMessage(chatId, 
+        bot.sendMessage(chatId,
             `👋 Welcome to Chess Bot, ${username}!\n\n` +
             `Choose an option from the buttons below to get started.\n\n` +
             `⏱️ Timer System:\n` +
@@ -2318,18 +2321,18 @@ bot.onText(/\/start(.*)/, (msg, match) => {
 // Handle /newgame command
 bot.onText(/\/newgame/i, async (msg) => {
     console.log('Received /newgame command', { chatId: msg.chat.id, chatType: msg.chat.type, username: msg.from?.username });
-    
+
     const chatId = msg.chat.id;
     const username = msg.from?.username || msg.from?.first_name || 'Unknown';
     const isChannel = msg.chat.type === 'channel' || msg.chat.type === 'supergroup';
     const gameKey = isChannel ? String(chatId) : String(chatId);
-    
+
     // Check if a game already exists
     if (activeGames.has(gameKey)) {
         bot.sendMessage(chatId, 'There is already an active game. Use /join to join the current game.');
         return;
     }
-    
+
     // Create a new game
     const newGame = new Chess();
     activeGames.set(gameKey, {
@@ -2345,18 +2348,19 @@ bot.onText(/\/newgame/i, async (msg) => {
         channelId: isChannel ? String(chatId) : null,
         channelMessageId: null
     });
-    
+
     if (isChannel) {
         // In channel - use helper function
         activeGames.delete(gameKey); // Clean up since we'll recreate in helper
         await startGameInChannel(chatId, username);
     } else {
         // In private chat - show with buttons
+        const gameStatePrivate = activeGames.get(gameKey);
         bot.sendMessage(chatId, `🎮 New game started by ${username}! Choose your side:`, {
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: '⚪ Join White', callback_data: 'join_white' }],
-                    [{ text: '⚫ Join Black', callback_data: 'join_black' }]
+                    [{ text: `⚪ Join White (${gameStatePrivate.whiteTeam.length} players)`, callback_data: 'join_white' }],
+                    [{ text: `⚫ Join Black (${gameStatePrivate.blackTeam.length} players)`, callback_data: 'join_black' }]
                 ]
             }
         });
@@ -2368,7 +2372,7 @@ bot.onText(/\/newgame/i, async (msg) => {
 bot.onText(/\/join/, (msg) => {
     const chatId = msg.chat.id;
     const username = msg.from.username || msg.from.first_name;
-    
+
     if (!activeGames.has(chatId)) {
         const keyboard = [[{ text: '🎮 Start New Game', callback_data: 'start_newgame' }]];
         bot.sendMessage(chatId, 'No active game found.', {
@@ -2376,19 +2380,19 @@ bot.onText(/\/join/, (msg) => {
         });
         return;
     }
-    
+
     const gameState = activeGames.get(chatId);
-    
+
     // Add player if not already in list
     if (!gameState.players.includes(username)) {
         gameState.players.push(username);
     }
-    
-    bot.sendMessage(chatId, 
+
+    bot.sendMessage(chatId,
         `👤 ${username} joined the game!\n` +
         `Players: ${gameState.players.join(', ')}`
     );
-    
+
     showGameStatus(chatId, gameState, username);
 });
 
@@ -2399,10 +2403,10 @@ bot.onText(/\/move (.+)/, async (msg, match) => {
         bot.sendMessage(msg.chat.id, '❌ Moves can only be made from your private chat with the bot. Start a conversation with me!');
         return;
     }
-    
+
     const chatId = msg.chat.id;
     const username = msg.from.username || msg.from.first_name;
-    
+
     if (!activeGames.has(chatId)) {
         const keyboard = [[{ text: '🎮 Start New Game', callback_data: 'start_newgame' }]];
         bot.sendMessage(chatId, 'No active game found.', {
@@ -2410,10 +2414,10 @@ bot.onText(/\/move (.+)/, async (msg, match) => {
         });
         return;
     }
-    
+
     const gameState = activeGames.get(chatId);
     const { game } = gameState;
-    
+
     // Check if game is over
     if (game.isGameOver()) {
         const keyboard = [[{ text: '🎮 Start New Game', callback_data: 'start_newgame' }]];
@@ -2422,45 +2426,45 @@ bot.onText(/\/move (.+)/, async (msg, match) => {
         });
         return;
     }
-    
+
     // Check if user has joined any team
     const hasJoinedTeam = gameState.whiteTeam.includes(username) || gameState.blackTeam.includes(username);
     if (!hasJoinedTeam) {
         bot.sendMessage(chatId, `❌ You must join a team first! Use /join to choose White or Black.`);
         return;
     }
-    
+
     // Check if user is on the correct team
     const currentSide = game.turn() === 'w' ? 'white' : 'black';
     const team = currentSide === 'white' ? gameState.whiteTeam : gameState.blackTeam;
-    
+
     if (!team.includes(username)) {
         const currentPlayer = currentSide === 'white' ? 'White' : 'Black';
         bot.sendMessage(chatId, `❌ It's ${currentPlayer}'s turn, but you're on the other team!`);
         return;
     }
-    
+
     const moveNotation = match[1].trim();
-    
+
     try {
         // Try to make the move
         const move = game.move(moveNotation);
-        
+
         if (!move) {
-            bot.sendMessage(chatId, 
+            bot.sendMessage(chatId,
                 `❌ Invalid move: ${moveNotation}\n\n` +
                 `Legal moves: ${getLegalMovesList(game)}`
             );
             return;
         }
-        
+
         // Move was successful
         gameState.lastMove = {
             player: username,
             move: moveNotation,
             timestamp: new Date()
         };
-        
+
         // Track captured pieces
         if (move.captured) {
             const capturedPiece = move.captured;
@@ -2468,7 +2472,7 @@ bot.onText(/\/move (.+)/, async (msg, match) => {
             const capturedSide = capturingSide === 'w' ? 'black' : 'white';
             gameState.capturedPieces[capturedSide].push(capturedPiece);
         }
-        
+
         // Add move to history with full details for analytics
         if (!gameState.moveHistory) {
             gameState.moveHistory = [];
@@ -2485,26 +2489,26 @@ bot.onText(/\/move (.+)/, async (msg, match) => {
             flags: move.flags || '',
             timestamp: Date.now()
         });
-        
+
         // Check if game ended and show analytics
         if (game.isGameOver()) {
             await displayGameAnalytics(chatId, gameState);
         }
-        
-        const moveDescription = move.captured ? 
-            `${move.from} → ${move.to} captures ${pieceSymbols[move.captured]}` : 
+
+        const moveDescription = move.captured ?
+            `${move.from} → ${move.to} captures ${pieceSymbols[move.captured]}` :
             `${move.from} → ${move.to}`;
-        
+
         // Notify about the move
-        bot.sendMessage(chatId, 
+        bot.sendMessage(chatId,
             `✅ ${username} played: ${moveDescription}`
         );
-        
+
         // Show updated board
         showGameStatus(chatId, gameState, username);
-        
+
     } catch (error) {
-        bot.sendMessage(chatId, 
+        bot.sendMessage(chatId,
             `❌ Error: ${error.message}`
         );
     }
@@ -2514,12 +2518,12 @@ bot.onText(/\/move (.+)/, async (msg, match) => {
 bot.onText(/\/resign/, (msg) => {
     const chatId = msg.chat.id;
     const username = msg.from.username || msg.from.first_name;
-    
+
     if (!activeGames.has(chatId)) {
         bot.sendMessage(chatId, `No active game to resign.`);
         return;
     }
-    
+
     activeGames.delete(chatId);
     bot.sendMessage(chatId, `🏳️ ${username} resigned. Game ended.`);
 });
@@ -2527,7 +2531,7 @@ bot.onText(/\/resign/, (msg) => {
 // Handle /help command
 bot.onText(/\/help/, (msg) => {
     const chatId = msg.chat.id;
-    
+
     const keyboard = [
         [
             { text: '🎮 New Game', callback_data: 'start_newgame' },
@@ -2537,7 +2541,7 @@ bot.onText(/\/help/, (msg) => {
             { text: '📚 Help', callback_data: 'start_help' }
         ]
     ];
-    
+
     bot.sendMessage(chatId,
         `📚 Chess Bot Commands:\n\n` +
         `Button Commands:\n` +
@@ -2569,21 +2573,21 @@ bot.on('polling_error', (error) => {
 // Listen to all messages for debugging and game triggers
 bot.on('message', async (msg) => {
     // Log all messages for debugging
-    console.log('Message received:', { 
-        chatId: msg.chat.id, 
+    console.log('Message received:', {
+        chatId: msg.chat.id,
         chatType: msg.chat.type,
         chatTitle: msg.chat.title || msg.chat.username,
         hasText: !!msg.text,
         from: msg.from?.username || 'Unknown'
     });
-    
+
     if (!msg.text) return;
-    
+
     const text = msg.text.toLowerCase();
     const chatId = msg.chat.id;
     const username = msg.from?.username || msg.from?.first_name || 'Unknown';
     const isChannel = msg.chat.type === 'channel' || msg.chat.type === 'supergroup';
-    
+
     // Check if message contains "new game" or "start game" in channels
     if (isChannel && (text.includes('new game') || text.includes('start game'))) {
         console.log(`Received game start request in channel ${chatId} from ${username}`);
