@@ -55,27 +55,74 @@ function canMakeMove(gameState) {
         return true; // No delay, can move immediately
     }
     
-    if (!gameState.lastMoveTime) {
-        return true; // No previous move, can move
+    const moveNumber = gameState.moveNumber || 0;
+    
+    // If round is in progress (odd moveNumber = only one side moved), allow immediate move
+    // moveNumber 0 = game start (white can move)
+    // moveNumber 1 = white moved (black can move immediately)
+    // moveNumber 2 = both moved (round 1 complete, timer starts)
+    if (moveNumber % 2 === 1) {
+        return true; // Round in progress, second player can move immediately
     }
     
-    const timeSinceLastMove = (Date.now() - gameState.lastMoveTime) / 1000; // in seconds
-    const requiredDelay = gameState.moveDelay.baseDelay + (gameState.moveDelay.increment * (gameState.moveNumber || 0));
+    // Round is complete (both sides moved), check timer
+    if (!gameState.roundEndTime) {
+        return true; // No timer set yet (shouldn't happen, but safe fallback)
+    }
     
-    return timeSinceLastMove >= requiredDelay;
+    // Check if timer has expired
+    const timeSinceRoundEnd = (Date.now() - gameState.roundEndTime) / 1000; // in seconds
+    const roundNumber = Math.floor(moveNumber / 2);
+    // First round (roundNumber=1) gets baseDelay only, subsequent rounds add increment
+    const requiredDelay = gameState.moveDelay.baseDelay + (gameState.moveDelay.increment * (roundNumber - 1));
+    
+    return timeSinceRoundEnd >= requiredDelay;
 }
 
 // Helper function to get remaining delay time
 function getRemainingDelay(gameState) {
-    if (!gameState.moveDelay || !gameState.moveDelay.enabled || !gameState.lastMoveTime) {
+    if (!gameState.moveDelay || !gameState.moveDelay.enabled) {
         return 0;
     }
     
-    const timeSinceLastMove = (Date.now() - gameState.lastMoveTime) / 1000;
-    const requiredDelay = gameState.moveDelay.baseDelay + (gameState.moveDelay.increment * (gameState.moveNumber || 0));
-    const remaining = Math.max(0, requiredDelay - timeSinceLastMove);
+    const moveNumber = gameState.moveNumber || 0;
+    
+    // If round is in progress (odd moveNumber), no delay needed
+    if (moveNumber % 2 === 1) {
+        return 0; // Round in progress, second player can move immediately
+    }
+    
+    // Round is complete, check timer
+    if (!gameState.roundEndTime) {
+        return 0;
+    }
+    
+    const roundNumber = Math.floor(moveNumber / 2);
+    const timeSinceRoundEnd = (Date.now() - gameState.roundEndTime) / 1000;
+    // First round (roundNumber=1) gets baseDelay only, subsequent rounds add increment
+    const requiredDelay = gameState.moveDelay.baseDelay + (gameState.moveDelay.increment * (roundNumber - 1));
+    const remaining = Math.max(0, requiredDelay - timeSinceRoundEnd);
     
     return Math.ceil(remaining);
+}
+
+// Helper function to format time nicely (seconds to days/hours/minutes)
+function formatTime(seconds) {
+    if (seconds < 60) {
+        return `${seconds}s`;
+    }
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    
+    const parts = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0 && days === 0) parts.push(`${minutes}m`); // Only show minutes if less than a day
+    if (secs > 0 && days === 0 && hours === 0) parts.push(`${secs}s`); // Only show seconds if less than an hour
+    
+    return parts.join(' ') || `${seconds}s`;
 }
 
 // Helper function to generate SVG chess board
@@ -164,10 +211,28 @@ async function showGameStatus(chatId, gameState, username = '', withButtons = tr
             statusMessage += ' ⚠️ (Check!)';
         }
         
-        // Add delay countdown if enabled
-        const remaining = getRemainingDelay(gameState);
-        if (remaining > 0) {
-            statusMessage += `\n\n⏳ Please wait ${remaining}s before the next move`;
+        // Add timer status display
+        if (gameState.moveDelay && gameState.moveDelay.enabled) {
+            const moveNumber = gameState.moveNumber || 0;
+            const remaining = getRemainingDelay(gameState);
+            const isRoundInProgress = moveNumber % 2 === 1;
+            
+            if (isRoundInProgress) {
+                // Round in progress - second player can move immediately (no timer)
+                const roundNumber = Math.floor(moveNumber / 2) + 1;
+                const waitingPlayer = currentPlayer === 'White' ? 'Black' : 'White';
+                statusMessage += `\n\n⏱️ Round ${roundNumber}: ${waitingPlayer} can move immediately (no timer during round)`;
+            } else if (remaining > 0) {
+                // Round complete, waiting for timer before next round
+                const roundNumber = Math.floor(moveNumber / 2);
+                const formattedTime = formatTime(remaining);
+                statusMessage += `\n\n⏳ Round ${roundNumber} complete. Timer: ${formattedTime} remaining before next round`;
+                statusMessage += `\n⏸️ Waiting for timer to expire...`;
+            } else if (moveNumber > 0 && moveNumber % 2 === 0) {
+                // Timer expired, ready for next round
+                const roundNumber = Math.floor(moveNumber / 2) + 1;
+                statusMessage += `\n\n✅ Timer expired! Ready for round ${roundNumber}`;
+            }
         }
     }
     
@@ -452,7 +517,15 @@ bot.on('callback_query', async (callbackQuery) => {
             drawVotes: { white: [], black: [] },
             moveHistory: [],
             channelId: isChannel ? String(chatId) : null,
-            channelMessageId: null
+            channelMessageId: null,
+            moveDelay: {
+                enabled: true,
+                baseDelay: 900, // 15 minutes
+                increment: 900  // +15 minutes per round
+            },
+            moveNumber: 0,
+            lastMoveTime: null,
+            roundEndTime: null
         });
         bot.sendMessage(chatId, `🎮 New game started by ${username}! Choose your side:`, {
             reply_markup: {
@@ -641,8 +714,8 @@ bot.on('callback_query', async (callbackQuery) => {
                 const blackTeam = JSON.parse(dbGame.blackTeam || '[]');
                 
                 // Initialize move delay system
-                const baseDelay = 5; // Start with 5 seconds delay
-                const increment = 2; // Increase by 2 seconds each move
+                const baseDelay = 900; // Start with 15 minutes delay between rounds
+                const increment = 900; // Increase by 15 minutes each round (900 seconds = 15 minutes)
                 
                 gameState = {
                     game: game,
@@ -664,7 +737,8 @@ bot.on('callback_query', async (callbackQuery) => {
                         increment: increment
                     },
                     lastMoveTime: null,
-                    moveNumber: 0
+                    moveNumber: 0,
+                    roundEndTime: null
                 };
                 
                 // Store in active games
@@ -1057,17 +1131,16 @@ bot.on('callback_query', async (callbackQuery) => {
             `🎮 New Game - Start a new chess game\n` +
             `👥 Join Game - Join the current game or view status\n` +
             `📚 Help - Show this help message\n\n` +
-            `Text Commands (also available):\n` +
-            `/newgame - Start a new chess game\n` +
-            `/join - Join the current game\n` +
-            `/move <move> - Make a move (e.g., /move e2e4)\n` +
-            `/resign - End the current game\n` +
-            `/help - Show this help message\n\n` +
             `📖 How to play:\n` +
             `1. Click "New Game" to start\n` +
             `2. Click "Join Game" to join (anyone can play)\n` +
             `3. Make moves by clicking the buttons below the board\n` +
-            `4. Moves are validated automatically`,
+            `4. Moves are validated automatically\n\n` +
+            `⏱️ Timer System:\n` +
+            `• Round in progress: After first player moves, second can move immediately\n` +
+            `• Round complete: After both move, timer starts (15 min round 1, +15 min each round)\n` +
+            `• Both teams must wait for timer to expire before next round starts\n` +
+            `• Check the board for timer countdown and current status`,
             {
                 reply_markup: { inline_keyboard: keyboard }
             }
@@ -1300,10 +1373,17 @@ bot.on('callback_query', async (callbackQuery) => {
             return;
         }
         
-        // Check if enough time has passed since last move
+        // Check if enough time has passed since last round ended
         if (!canMakeMove(targetGameState)) {
             const remaining = getRemainingDelay(targetGameState);
-            bot.sendMessage(chatId, `⏳ Please wait ${remaining} seconds before making your next move.`);
+            const formattedTime = formatTime(remaining);
+            const moveNumber = targetGameState.moveNumber || 0;
+            const roundNumber = Math.floor(moveNumber / 2);
+            bot.sendMessage(chatId, 
+                `⏳ Timer is still counting down!\n\n` +
+                `Round ${roundNumber} is complete. Please wait ${formattedTime} for the timer to expire before starting round ${roundNumber + 1}.\n\n` +
+                `(Both sides must wait after completing a round)`
+            );
             await showGameStatus(chatId, targetGameState, username);
             return;
         }
@@ -1339,9 +1419,15 @@ bot.on('callback_query', async (callbackQuery) => {
                 timestamp: new Date()
             };
             
-            // Update delay tracking
+            // Update move tracking
             targetGameState.lastMoveTime = Date.now();
             targetGameState.moveNumber = (targetGameState.moveNumber || 0) + 1;
+            
+            // If round is complete (both sides moved), start the timer
+            // moveNumber is now even (2, 4, 6...) = both sides have moved
+            if (targetGameState.moveNumber % 2 === 0) {
+                targetGameState.roundEndTime = Date.now();
+            }
             
             // Track captured pieces
             if (move.captured) {
@@ -1384,7 +1470,18 @@ bot.on('callback_query', async (callbackQuery) => {
             }
             
             // Notify about the move
-            bot.sendMessage(chatId, `✅ ${username} played: ${moveDescription}`);
+            let moveNotification = `✅ ${username} played: ${moveDescription}`;
+            
+            // If round just completed (both sides moved), inform players timer has started
+            if (targetGameState.moveNumber % 2 === 0 && targetGameState.moveDelay && targetGameState.moveDelay.enabled) {
+                const roundNumber = Math.floor(targetGameState.moveNumber / 2);
+                // First round (roundNumber=1) gets baseDelay only, subsequent rounds add increment
+                const timeLimit = targetGameState.moveDelay.baseDelay + (targetGameState.moveDelay.increment * (roundNumber - 1));
+                const formattedTime = formatTime(timeLimit);
+                moveNotification += `\n\n⏰ Round ${roundNumber} complete! Timer started: ${formattedTime} before next round`;
+            }
+            
+            bot.sendMessage(chatId, moveNotification);
             
             // Show updated board in private chat
             await showGameStatus(chatId, targetGameState, username);
@@ -1436,8 +1533,8 @@ async function startGameInChannel(channelId, username) {
     // Create a new game
     const newGame = new Chess();
     // Initialize move delay system
-    const baseDelay = 5; // Start with 5 seconds between moves
-    const increment = 2; // Increase by 2 seconds each move
+    const baseDelay = 900; // Start with 15 minutes delay between rounds
+    const increment = 900; // Increase by 15 minutes each round (900 seconds = 15 minutes)
     
     activeGames.set(gameKey, {
         game: newGame,
@@ -1458,7 +1555,8 @@ async function startGameInChannel(channelId, username) {
             increment: increment
         },
         lastMoveTime: null,
-        moveNumber: 0
+        moveNumber: 0,
+        roundEndTime: null
     });
     
     // Get channel name for database
@@ -1492,7 +1590,11 @@ async function startGameInChannel(channelId, username) {
         `🎮 Chess Game Started! 🎮\n\n` +
         `📱 Click "Join & Play" on the board above to start playing! 👆\n\n` +
         `⚪ White plays first!\n` +
-        `👥 Anyone can join the game!`,
+        `👥 Anyone can join the game!\n\n` +
+        `⏱️ Timer System:\n` +
+        `• During rounds: Players can move immediately (no waiting)\n` +
+        `• After both move: 15 min timer starts (increases each round)\n` +
+        `• Both teams wait for timer to expire before next round`,
         {
             reply_markup: {
                 inline_keyboard: [
@@ -1571,7 +1673,11 @@ bot.onText(/\/start(.*)/, (msg, match) => {
     } else {
         bot.sendMessage(chatId, 
             `👋 Welcome to Chess Bot, ${username}!\n\n` +
-            `Choose an option from the buttons below to get started:`,
+            `Choose an option from the buttons below to get started.\n\n` +
+            `⏱️ Timer System:\n` +
+            `• During a round: Players can move immediately (no waiting)\n` +
+            `• After both sides move: Timer starts (15 min for round 1, increases each round)\n` +
+            `• Both teams wait until timer expires before next round begins`,
             options
         );
     }
