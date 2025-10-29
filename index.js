@@ -43,11 +43,68 @@ if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true });
 }
 
-// Unicode chess pieces for SVG
+// Unicode chess pieces for SVG (fallback)
 const pieceUnicode = {
     'p': '♟', 'n': '♞', 'b': '♝', 'r': '♜', 'q': '♛', 'k': '♚',
     'P': '♙', 'N': '♘', 'B': '♗', 'R': '♖', 'Q': '♕', 'K': '♔'
 };
+
+// Mapping from chess piece notation to SVG filenames
+// chess.js format: { color: 'w'|'b', type: 'p'|'n'|'b'|'r'|'q'|'k' }
+// SVG files: Chess_[type][lt|dt]45.svg where lt=light(white), dt=dark(black)
+const pieceSvgMap = {
+    'P': 'Chess_plt45.svg', // white pawn
+    'N': 'Chess_nlt45.svg', // white knight
+    'B': 'Chess_blt45.svg', // white bishop
+    'R': 'Chess_rlt45.svg', // white rook
+    'Q': 'Chess_qlt45.svg', // white queen
+    'K': 'Chess_klt45.svg', // white king
+    'p': 'Chess_pdt45.svg', // black pawn
+    'n': 'Chess_ndt45.svg', // black knight
+    'b': 'Chess_bdt45.svg', // black bishop
+    'r': 'Chess_rdt45.svg', // black rook
+    'q': 'Chess_qdt45.svg', // black queen
+    'k': 'Chess_kdt45.svg'  // black king
+};
+
+// Cache for loaded SVG content
+const pieceSvgCache = new Map();
+
+// Helper function to load and extract SVG content from files
+function loadPieceSvg(pieceKey) {
+    if (pieceSvgCache.has(pieceKey)) {
+        return pieceSvgCache.get(pieceKey);
+    }
+    
+    const svgFile = pieceSvgMap[pieceKey];
+    if (!svgFile) {
+        return null;
+    }
+    
+    const svgPath = path.join(__dirname, 'assets', 'pieces', svgFile);
+    
+    try {
+        if (!fs.existsSync(svgPath)) {
+            console.warn(`SVG file not found: ${svgPath}`);
+            return null;
+        }
+        
+        const svgContent = fs.readFileSync(svgPath, 'utf8');
+        // Extract the inner content (everything between <svg> tags)
+        // Match either self-closing or with closing tag
+        const innerContentMatch = svgContent.match(/<svg[^>]*>([\s\S]*)<\/svg>/i);
+        if (innerContentMatch && innerContentMatch[1]) {
+            const innerContent = innerContentMatch[1].trim();
+            pieceSvgCache.set(pieceKey, innerContent);
+            return innerContent;
+        }
+        
+        return null;
+    } catch (error) {
+        console.error(`Error loading SVG for ${pieceKey}:`, error);
+        return null;
+    }
+}
 
 // Helper function to check if enough time has passed since the last move
 function canMakeMove(gameState) {
@@ -157,8 +214,27 @@ function generateChessBoardSVG(game) {
             // Add piece from the actual board position
             const square = board[displayRank][displayFile];
             if (square) {
-                const pieceChar = pieceUnicode[square.color === 'w' ? square.type.toUpperCase() : square.type];
-                svg += `<text x="${x + squareSize / 2}" y="${y + squareSize / 2}" font-size="${squareSize - 10}" fill="${square.color === 'w' ? 'white' : 'black'}" text-anchor="middle" dominant-baseline="central" style="text-shadow: 2px 2px 3px rgba(0,0,0,0.5);">${pieceChar}</text>`;
+                // Get piece key for SVG lookup (uppercase for white, lowercase for black)
+                const pieceKey = square.color === 'w' ? square.type.toUpperCase() : square.type;
+                
+                // Try to load SVG content
+                const svgContent = loadPieceSvg(pieceKey);
+                
+                if (svgContent) {
+                    // Embed SVG content with proper scaling and positioning
+                    // SVG files are 45x45, we need to scale them to fit the square
+                    const scale = squareSize / 45;
+                    const centerX = x + squareSize / 2;
+                    const centerY = y + squareSize / 2;
+                    
+                    svg += `<g transform="translate(${centerX}, ${centerY}) scale(${scale}) translate(-22.5, -22.5)">`;
+                    svg += svgContent;
+                    svg += `</g>`;
+                } else {
+                    // Fallback to Unicode if SVG not available
+                    const pieceChar = pieceUnicode[pieceKey];
+                    svg += `<text x="${x + squareSize / 2}" y="${y + squareSize / 2}" font-size="${squareSize - 10}" fill="${square.color === 'w' ? 'white' : 'black'}" text-anchor="middle" dominant-baseline="central" style="text-shadow: 2px 2px 3px rgba(0,0,0,0.5);">${pieceChar}</text>`;
+                }
             }
             
             // Add coordinates on all 4 sides (adjusted for rotation)
