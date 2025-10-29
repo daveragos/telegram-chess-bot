@@ -233,7 +233,7 @@ function generateChessBoardSVG(game) {
                 } else {
                     // Fallback to Unicode if SVG not available
                     const pieceChar = pieceUnicode[pieceKey];
-                    svg += `<text x="${x + squareSize / 2}" y="${y + squareSize / 2}" font-size="${squareSize - 10}" fill="${square.color === 'w' ? 'white' : 'black'}" text-anchor="middle" dominant-baseline="central" style="text-shadow: 2px 2px 3px rgba(0,0,0,0.5);">${pieceChar}</text>`;
+                    svg += `<text x="${x + squareSize / 2}" y="${y + squareSize / 2}" font-size="${squareSize - 10}" fill="${square.color === 'w' ? 'white' : 'black'}" text-anchor="middle" dominant-baseline="central" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif" style="text-shadow: 2px 2px 3px rgba(0,0,0,0.5);">${pieceChar}</text>`;
                 }
             }
             
@@ -241,22 +241,22 @@ function generateChessBoardSVG(game) {
             // Left side (ranks)
             if (file === 0) {
                 const rankLabel = isBlackTurn ? (rank + 1) : (8 - rank);
-                svg += `<text x="${padding + 10}" y="${y + squareSize / 2}" font-size="18" fill="#333" text-anchor="middle" dominant-baseline="central" font-weight="bold">${rankLabel}</text>`;
+                svg += `<text x="${padding + 10}" y="${y + squareSize / 2}" font-size="18" fill="#333" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif">${rankLabel}</text>`;
             }
             // Right side (ranks)
             if (file === 7) {
                 const rankLabel = isBlackTurn ? (rank + 1) : (8 - rank);
-                svg += `<text x="${padding + boardSize + 80}" y="${y + squareSize / 2}" font-size="18" fill="#333" text-anchor="middle" dominant-baseline="central" font-weight="bold">${rankLabel}</text>`;
+                svg += `<text x="${padding + boardSize + 80}" y="${y + squareSize / 2}" font-size="18" fill="#333" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif">${rankLabel}</text>`;
             }
             // Top side (files)
             if (rank === 0) {
                 const fileLabel = isBlackTurn ? String.fromCharCode(104 - file) : String.fromCharCode(97 + file);
-                svg += `<text x="${x + squareSize / 2}" y="${padding + 10}" font-size="18" fill="#333" text-anchor="middle" dominant-baseline="central" font-weight="bold">${fileLabel}</text>`;
+                svg += `<text x="${x + squareSize / 2}" y="${padding + 10}" font-size="18" fill="#333" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif">${fileLabel}</text>`;
             }
             // Bottom side (files)
             if (rank === 7) {
                 const fileLabel = isBlackTurn ? String.fromCharCode(104 - file) : String.fromCharCode(97 + file);
-                svg += `<text x="${x + squareSize / 2}" y="${padding + boardSize + 70}" font-size="18" fill="#333" text-anchor="middle" dominant-baseline="central" font-weight="bold">${fileLabel}</text>`;
+                svg += `<text x="${x + squareSize / 2}" y="${padding + boardSize + 70}" font-size="18" fill="#333" text-anchor="middle" dominant-baseline="central" font-weight="bold" font-family="DejaVu Sans, Liberation Sans, Arial, sans-serif">${fileLabel}</text>`;
             }
         }
     }
