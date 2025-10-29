@@ -182,6 +182,542 @@ function formatTime(seconds) {
     return parts.join(' ') || `${seconds}s`;
 }
 
+// Helper function to evaluate chess position (material-based evaluation)
+// Returns positive for white advantage, negative for black advantage
+function evaluatePosition(game) {
+    if (game.isCheckmate()) {
+        return game.turn() === 'w' ? -10000 : 10000; // White to move and checkmate = black wins
+    }
+    if (game.isDraw() || game.isStalemate()) {
+        return 0;
+    }
+    
+    const board = game.board();
+    let evaluation = 0;
+    
+    for (let rank = 0; rank < 8; rank++) {
+        for (let file = 0; file < 8; file++) {
+            const piece = board[rank][file];
+            if (piece) {
+                const value = pieceValues[piece.type.toUpperCase()] || 0;
+                // Add piece-square table bonuses for better positional awareness
+                let positionalBonus = 0;
+                
+                // Pawn structure bonus
+                if (piece.type === 'p' || piece.type === 'P') {
+                    // Center pawns are more valuable
+                    if (file >= 3 && file <= 4) {
+                        positionalBonus = 0.2;
+                    }
+                    // Advanced pawns get bonus (for white, rank 5-7; for black, rank 0-2)
+                    if (piece.color === 'w' && rank >= 4) {
+                        positionalBonus += 0.1 * (rank - 3);
+                    } else if (piece.color === 'b' && rank <= 3) {
+                        positionalBonus += 0.1 * (4 - rank);
+                    }
+                }
+                
+                // King safety - penalize exposed kings
+                if (piece.type === 'k' || piece.type === 'K') {
+                    // Penalize king in center early game (simplified)
+                    if (file >= 2 && file <= 5 && rank >= 2 && rank <= 5) {
+                        positionalBonus = -0.5;
+                    }
+                }
+                
+                const totalValue = value + positionalBonus;
+                evaluation += piece.color === 'w' ? totalValue : -totalValue;
+            }
+        }
+    }
+    
+    // Check bonus
+    if (game.isCheck()) {
+        evaluation += game.turn() === 'w' ? -0.5 : 0.5;
+    }
+    
+    return evaluation;
+}
+
+// Helper function to generate comprehensive game analytics
+async function generateGameAnalytics(gameState) {
+    const { game, moveHistory, whiteTeam, blackTeam } = gameState;
+    
+    // Initialize analytics data
+    const analytics = {
+        totalMoves: moveHistory.length,
+        whiteTeam: whiteTeam || [],
+        blackTeam: blackTeam || [],
+        playerStats: {},
+        bestMoves: [],
+        blunders: [],
+        captures: { white: 0, black: 0 },
+        promotions: [],
+        checks: 0,
+        castling: { white: false, black: false },
+        gameResult: null
+    };
+    
+    // Determine game result
+    if (game.isCheckmate()) {
+        analytics.gameResult = game.turn() === 'w' ? 'Black wins by checkmate' : 'White wins by checkmate';
+    } else if (game.isDraw()) {
+        analytics.gameResult = 'Draw';
+    } else if (game.isStalemate()) {
+        analytics.gameResult = 'Stalemate - Draw';
+    } else {
+        analytics.gameResult = 'Game ended';
+    }
+    
+    // Initialize player stats
+    [...whiteTeam, ...blackTeam].forEach(player => {
+        analytics.playerStats[player] = {
+            moves: 0,
+            whiteMoves: 0,
+            blackMoves: 0,
+            captures: 0,
+            bestMoves: 0,
+            blunders: 0,
+            checks: 0
+        };
+    });
+    
+    // Replay game to calculate evaluations
+    const tempGame = new Chess();
+    const moveEvaluations = [];
+    
+    // Calculate evaluation for each move
+    for (let i = 0; i < moveHistory.length; i++) {
+        const moveData = moveHistory[i];
+        const player = moveData.player;
+        const side = i % 2 === 0 ? 'white' : 'black';
+        
+        // Get evaluation before move
+        const evaluationBefore = evaluatePosition(tempGame);
+        
+        // Parse and make the move - use stored from/to if available, otherwise parse
+        let from, to;
+        if (moveData.from && moveData.to) {
+            from = moveData.from;
+            to = moveData.to;
+        } else {
+            const moveMatch = moveData.move.match(/(\w+) → (\w+)/);
+            if (moveMatch) {
+                from = moveMatch[1];
+                to = moveMatch[2];
+            } else {
+                continue; // Skip if we can't parse
+            }
+        }
+        
+        try {
+            const move = tempGame.move({ from, to });
+            if (move) {
+                const evaluationAfter = evaluatePosition(tempGame);
+                const evaluationDelta = side === 'white' 
+                    ? (evaluationAfter - evaluationBefore)
+                    : (evaluationBefore - evaluationAfter); // Invert for black
+                
+                // Update player stats
+                if (!analytics.playerStats[player]) {
+                    analytics.playerStats[player] = {
+                        moves: 0,
+                        whiteMoves: 0,
+                        blackMoves: 0,
+                        captures: 0,
+                        bestMoves: 0,
+                        blunders: 0,
+                        checks: 0
+                    };
+                }
+                
+                analytics.playerStats[player].moves++;
+                if (side === 'white') {
+                    analytics.playerStats[player].whiteMoves++;
+                } else {
+                    analytics.playerStats[player].blackMoves++;
+                }
+                
+                if (move.captured) {
+                    analytics.playerStats[player].captures++;
+                    if (side === 'white') {
+                        analytics.captures.white++;
+                    } else {
+                        analytics.captures.black++;
+                    }
+                }
+                
+                if (move.promotion) {
+                    analytics.promotions.push({
+                        player,
+                        move: `${from}→${to}`,
+                        promotion: move.promotion.toUpperCase()
+                    });
+                }
+                
+                if (move.inCheck) {
+                    analytics.checks++;
+                    analytics.playerStats[player].checks++;
+                }
+                
+                if (move.flags && move.flags.includes('k')) {
+                    if (side === 'white') {
+                        analytics.castling.white = true;
+                    } else {
+                        analytics.castling.black = true;
+                    }
+                }
+                
+                moveEvaluations.push({
+                    moveNumber: i + 1,
+                    player,
+                    side,
+                    move: `${from}→${to}`,
+                    evaluationBefore,
+                    evaluationAfter,
+                    evaluationDelta,
+                    captured: move.captured,
+                    promotion: move.promotion
+                });
+            }
+        } catch (error) {
+            console.error('Error replaying move for analytics:', error);
+        }
+    }
+    
+    // Find best moves (biggest positive evaluation changes)
+    const sortedBestMoves = [...moveEvaluations]
+        .filter(m => m.evaluationDelta > 0)
+        .sort((a, b) => b.evaluationDelta - a.evaluationDelta)
+        .slice(0, 5);
+    
+    analytics.bestMoves = sortedBestMoves.map(m => ({
+        move: m.move,
+        player: m.player,
+        side: m.side,
+        improvement: m.evaluationDelta.toFixed(2),
+        moveNumber: m.moveNumber
+    }));
+    
+    // Find blunders (biggest negative evaluation changes)
+    const sortedBlunders = [...moveEvaluations]
+        .filter(m => m.evaluationDelta < -1.0) // Only consider significant losses (>1 point)
+        .sort((a, b) => a.evaluationDelta - b.evaluationDelta)
+        .slice(0, 5);
+    
+    analytics.blunders = sortedBlunders.map(m => ({
+        move: m.move,
+        player: m.player,
+        side: m.side,
+        loss: Math.abs(m.evaluationDelta).toFixed(2),
+        moveNumber: m.moveNumber
+    }));
+    
+    // Update best moves and blunders count
+    sortedBestMoves.forEach(m => {
+        if (analytics.playerStats[m.player]) {
+            analytics.playerStats[m.player].bestMoves++;
+        }
+    });
+    
+    sortedBlunders.forEach(m => {
+        if (analytics.playerStats[m.player]) {
+            analytics.playerStats[m.player].blunders++;
+        }
+    });
+    
+    return analytics;
+}
+
+// Helper function to export game data in PGN format (for external analysis)
+function exportGamePGN(gameState) {
+    const { game, whiteTeam, blackTeam, moveHistory } = gameState;
+    
+    // Create PGN headers
+    const pgn = [];
+    pgn.push(`[Event "Telegram Chess Bot Game"]`);
+    pgn.push(`[Site "Telegram"]`);
+    pgn.push(`[Date "${new Date().toISOString().split('T')[0]}"]`);
+    pgn.push(`[Round "1"]`);
+    pgn.push(`[White "${whiteTeam.join(', ')}"]`);
+    pgn.push(`[Black "${blackTeam.join(', ')}"]`);
+    
+    // Add result
+    if (game.isCheckmate()) {
+        pgn.push(`[Result "${game.turn() === 'w' ? '0-1' : '1-0'}"]`);
+    } else if (game.isDraw() || game.isStalemate()) {
+        pgn.push(`[Result "1/2-1/2"]`);
+    } else {
+        pgn.push(`[Result "*"]`);
+    }
+    
+    pgn.push(``);
+    
+    // Export moves from chess.js (it handles PGN notation automatically)
+    const pgnMoves = game.pgn();
+    pgn.push(pgnMoves);
+    
+    // Add result at the end
+    if (game.isCheckmate()) {
+        pgn.push(` ${game.turn() === 'w' ? '0-1' : '1-0'}`);
+    } else if (game.isDraw() || game.isStalemate()) {
+        pgn.push(` 1/2-1/2`);
+    }
+    
+    return pgn.join('\n');
+}
+
+// Helper function to export game data as JSON
+function exportGameJSON(gameState) {
+    const { game, whiteTeam, blackTeam, moveHistory, capturedPieces } = gameState;
+    
+    // Recreate full game history with detailed move info
+    const tempGame = new Chess();
+    const detailedMoves = [];
+    
+    // Add initial position
+    detailedMoves.push({
+        moveNumber: 0,
+        fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+        evaluation: evaluatePosition(tempGame)
+    });
+    
+    // Replay all moves
+    for (let i = 0; i < moveHistory.length; i++) {
+        const moveData = moveHistory[i];
+        let from, to;
+        
+        if (moveData.from && moveData.to) {
+            from = moveData.from;
+            to = moveData.to;
+        } else {
+            const moveMatch = moveData.move.match(/(\w+) → (\w+)/);
+            if (moveMatch) {
+                from = moveMatch[1];
+                to = moveMatch[2];
+            } else {
+                continue;
+            }
+        }
+        
+        try {
+            const move = tempGame.move({ from, to });
+            if (move) {
+                const evaluation = evaluatePosition(tempGame);
+                detailedMoves.push({
+                    moveNumber: i + 1,
+                    player: moveData.player,
+                    move: {
+                        from: move.from,
+                        to: move.to,
+                        san: move.san,
+                        uci: `${move.from}${move.to}${move.promotion || ''}`,
+                        captured: move.captured || null,
+                        promotion: move.promotion || null,
+                        flags: move.flags,
+                        inCheck: move.inCheck || false,
+                        timestamp: moveData.timestamp || null
+                    },
+                    fen: tempGame.fen(),
+                    evaluation: evaluation,
+                    side: i % 2 === 0 ? 'white' : 'black'
+                });
+            }
+        } catch (error) {
+            console.error('Error exporting move:', error);
+        }
+    }
+    
+    const gameData = {
+        metadata: {
+            whiteTeam: whiteTeam || [],
+            blackTeam: blackTeam || [],
+            result: game.isCheckmate() 
+                ? (game.turn() === 'w' ? '0-1' : '1-0')
+                : (game.isDraw() || game.isStalemate() ? '1/2-1/2' : '*'),
+            totalMoves: moveHistory.length,
+            capturedPieces: capturedPieces || { white: [], black: [] },
+            date: new Date().toISOString()
+        },
+        moves: detailedMoves
+    };
+    
+    return JSON.stringify(gameData, null, 2);
+}
+
+// Helper function to format and display analytics
+async function displayGameAnalytics(chatId, gameState) {
+    try {
+        const analytics = await generateGameAnalytics(gameState);
+        
+        let report = `📊 GAME ANALYTICS REPORT 📊\n\n`;
+        report += `═══════════════════════════════\n\n`;
+        
+        // Game Result
+        report += `🏆 RESULT: ${analytics.gameResult}\n`;
+        report += `📈 Total Moves: ${analytics.totalMoves}\n\n`;
+        
+        // Player Statistics
+        report += `👥 PLAYER STATISTICS\n`;
+        report += `─────────────────────\n\n`;
+        
+        // Most active players
+        const playersByMoves = Object.entries(analytics.playerStats)
+            .sort((a, b) => b[1].moves - a[1].moves);
+        
+        // White team moves
+        const whitePlayers = playersByMoves
+            .filter(([player]) => analytics.whiteTeam.includes(player))
+            .map(([player, stats]) => ({
+                player,
+                moves: stats.whiteMoves,
+                stats
+            }))
+            .sort((a, b) => b.moves - a.moves);
+        
+        if (whitePlayers.length > 0) {
+            report += `⚪ WHITE TEAM:\n`;
+            whitePlayers.forEach(({ player, moves, stats }, index) => {
+                report += `${index + 1}. ${player}: ${moves} moves`;
+                if (stats.captures > 0) report += `, ${stats.captures} captures`;
+                if (stats.checks > 0) report += `, ${stats.checks} checks`;
+                report += `\n`;
+            });
+            report += `\n`;
+        }
+        
+        // Black team moves
+        const blackPlayers = playersByMoves
+            .filter(([player]) => analytics.blackTeam.includes(player))
+            .map(([player, stats]) => ({
+                player,
+                moves: stats.blackMoves,
+                stats
+            }))
+            .sort((a, b) => b.moves - a.moves);
+        
+        if (blackPlayers.length > 0) {
+            report += `⚫ BLACK TEAM:\n`;
+            blackPlayers.forEach(({ player, moves, stats }, index) => {
+                report += `${index + 1}. ${player}: ${moves} moves`;
+                if (stats.captures > 0) report += `, ${stats.captures} captures`;
+                if (stats.checks > 0) report += `, ${stats.checks} checks`;
+                report += `\n`;
+            });
+            report += `\n`;
+        }
+        
+        // Additional Statistics
+        report += `📊 ADDITIONAL STATS\n`;
+        report += `─────────────────────\n`;
+        report += `Captures - White: ${analytics.captures.white}, Black: ${analytics.captures.black}\n`;
+        
+        if (analytics.promotions.length > 0) {
+            report += `Promotions: ${analytics.promotions.length}\n`;
+            analytics.promotions.forEach(p => {
+                report += `  • ${p.player}: ${p.move} → ${p.promotion}\n`;
+            });
+        }
+        
+        if (analytics.castling.white || analytics.castling.black) {
+            report += `Castling: `;
+            if (analytics.castling.white) report += `White `;
+            if (analytics.castling.black) report += `Black`;
+            report += `\n`;
+        }
+        
+        report += `Total Checks: ${analytics.checks}\n`;
+        
+        report += `\n═══════════════════════════════\n`;
+        report += `Thanks for playing! 🎉`;
+        
+        // Send the report
+        await bot.sendMessage(chatId, report);
+        
+        // Export game data for external analysis
+        const pgn = exportGamePGN(gameState);
+        const json = exportGameJSON(gameState);
+        
+        // Helper function to send export data
+        const sendExportData = async (targetChatId) => {
+            try {
+                // Send PGN (most external engines accept this)
+                await bot.sendMessage(targetChatId, 
+                    `📄 GAME DATA FOR EXTERNAL ANALYSIS\n\n` +
+                    `Copy the PGN below to analyze with Stockfish, Lichess, Chess.com, etc:\n\n` +
+                    `\`\`\`\n${pgn}\n\`\`\``,
+                    { parse_mode: 'Markdown' }
+                );
+                
+                // Send JSON data (may be split if too long)
+                const maxMessageLength = 4000; // Telegram message limit is ~4096
+                if (json.length > maxMessageLength) {
+                    // Split into chunks
+                    const chunks = [];
+                    for (let i = 0; i < json.length; i += maxMessageLength - 100) {
+                        chunks.push(json.substring(i, i + maxMessageLength - 100));
+                    }
+                    await bot.sendMessage(targetChatId,
+                        `📊 Detailed JSON Data (Part 1/${chunks.length}):\n\n` +
+                        `\`\`\`json\n${chunks[0]}\n\`\`\``,
+                        { parse_mode: 'Markdown' }
+                    );
+                    for (let i = 1; i < chunks.length; i++) {
+                        await bot.sendMessage(targetChatId,
+                            `📊 JSON Data (Part ${i + 1}/${chunks.length}):\n\n` +
+                            `\`\`\`json\n${chunks[i]}\n\`\`\``,
+                            { parse_mode: 'Markdown' }
+                        );
+                    }
+                } else {
+                    await bot.sendMessage(targetChatId,
+                        `📊 Detailed JSON Data (for custom analysis):\n\n` +
+                        `\`\`\`json\n${json}\n\`\`\``,
+                        { parse_mode: 'Markdown' }
+                    );
+                }
+            } catch (error) {
+                console.error(`Error sending export data to ${targetChatId}:`, error);
+                // Fallback: send without markdown formatting if it fails
+                try {
+                    await bot.sendMessage(targetChatId, 
+                        `📄 PGN Data:\n\n${pgn}\n\n📊 JSON Data:\n\n${json.substring(0, 4000)}${json.length > 4000 ? '...[truncated]' : ''}`
+                    );
+                } catch (e) {
+                    console.error(`Failed to send export data to ${targetChatId}:`, e);
+                }
+            }
+        };
+        
+        // Send export data to current user
+        await sendExportData(chatId);
+        
+        // Also send to channel if it's a channel game
+        if (gameState.channelId && gameState.channelId !== String(chatId)) {
+            await bot.sendMessage(gameState.channelId, report);
+            await sendExportData(gameState.channelId);
+        }
+        
+        // Send to all joined users
+        if (gameState.joinedUsers && gameState.joinedUsers.length > 0) {
+            for (const userId of gameState.joinedUsers) {
+                if (userId !== chatId && userId !== gameState.channelId) {
+                    try {
+                        await bot.sendMessage(userId, report);
+                        await sendExportData(userId);
+                    } catch (error) {
+                        console.error(`Error sending analytics to user ${userId}:`, error);
+                    }
+                }
+            }
+        }
+        
+    } catch (error) {
+        console.error('Error generating analytics:', error);
+        bot.sendMessage(chatId, 'Error generating analytics report.');
+    }
+}
+
 // Helper function to generate SVG chess board
 function generateChessBoardSVG(game) {
     const board = game.board();
@@ -1371,6 +1907,9 @@ bot.on('callback_query', async (callbackQuery) => {
             
             if (voteCount >= majorityNeeded) {
                 // Majority reached - end game
+                // Show analytics before deleting
+                await displayGameAnalytics(chatId, gameState);
+                
                 activeGames.delete(gameKey);
                 
                 // Delete from database if it's a channel game
@@ -1513,7 +2052,7 @@ bot.on('callback_query', async (callbackQuery) => {
                 targetGameState.capturedPieces[capturedSide].push(capturedPiece);
             }
             
-            // Add move to history
+            // Add move to history with full details for analytics
             if (!targetGameState.moveHistory) {
                 targetGameState.moveHistory = [];
             }
@@ -1521,7 +2060,13 @@ bot.on('callback_query', async (callbackQuery) => {
                 number: targetGameState.moveHistory.length + 1,
                 player: username,
                 move: `${move.from} → ${move.to}`,
-                captured: move.captured ? pieceSymbols[move.captured] : null
+                moveSan: move.san, // Standard Algebraic Notation
+                from: move.from,
+                to: move.to,
+                captured: move.captured ? pieceSymbols[move.captured] : null,
+                promotion: move.promotion || null,
+                flags: move.flags || '',
+                timestamp: Date.now()
             });
             
             const moveDescription = move.captured ? 
@@ -1539,9 +2084,11 @@ bot.on('callback_query', async (callbackQuery) => {
                     moveCount: targetGame.history().length
                 });
                 
-                // If game is over, delete from database
+                // If game is over, delete from database and show analytics
                 if (targetGame.isGameOver()) {
                     await deleteGame(db, targetGameState.channelId);
+                    // Display analytics for the finished game
+                    await displayGameAnalytics(chatId, targetGameState);
                 }
             }
             
@@ -1562,6 +2109,11 @@ bot.on('callback_query', async (callbackQuery) => {
             // Show updated board in private chat
             await showGameStatus(chatId, targetGameState, username);
             
+            // Check if game ended and show analytics
+            if (targetGame.isGameOver()) {
+                await displayGameAnalytics(chatId, targetGameState);
+            }
+            
             // Also update channel board if this is a channel game
             if (targetGameState.channelId) {
                 await showGameStatus(targetGameState.channelId, targetGameState, username, false);
@@ -1573,6 +2125,10 @@ bot.on('callback_query', async (callbackQuery) => {
                     if (userId !== chatId) { // Don't send to the player who made the move (already sent above)
                         try {
                             await showGameStatus(userId, targetGameState, '');
+                            // Also send analytics if game is over
+                            if (targetGame.isGameOver()) {
+                                await displayGameAnalytics(userId, targetGameState);
+                            }
                         } catch (error) {
                             console.error(`Error sending update to user ${userId}:`, error);
                         }
@@ -1837,7 +2393,7 @@ bot.onText(/\/join/, (msg) => {
 });
 
 // Handle /move command
-bot.onText(/\/move (.+)/, (msg, match) => {
+bot.onText(/\/move (.+)/, async (msg, match) => {
     // Only allow moves from private chats
     if (msg.chat.type !== 'private') {
         bot.sendMessage(msg.chat.id, '❌ Moves can only be made from your private chat with the bot. Start a conversation with me!');
@@ -1913,7 +2469,7 @@ bot.onText(/\/move (.+)/, (msg, match) => {
             gameState.capturedPieces[capturedSide].push(capturedPiece);
         }
         
-        // Add move to history
+        // Add move to history with full details for analytics
         if (!gameState.moveHistory) {
             gameState.moveHistory = [];
         }
@@ -1921,8 +2477,19 @@ bot.onText(/\/move (.+)/, (msg, match) => {
             number: gameState.moveHistory.length + 1,
             player: username,
             move: `${move.from} → ${move.to}`,
-            captured: move.captured ? pieceSymbols[move.captured] : null
+            moveSan: move.san, // Standard Algebraic Notation
+            from: move.from,
+            to: move.to,
+            captured: move.captured ? pieceSymbols[move.captured] : null,
+            promotion: move.promotion || null,
+            flags: move.flags || '',
+            timestamp: Date.now()
         });
+        
+        // Check if game ended and show analytics
+        if (game.isGameOver()) {
+            await displayGameAnalytics(chatId, gameState);
+        }
         
         const moveDescription = move.captured ? 
             `${move.from} → ${move.to} captures ${pieceSymbols[move.captured]}` : 
